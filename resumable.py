@@ -87,7 +87,9 @@ class YieldValue(Exception):
         self.sender = sender
 
 
-def try_run_resumable(resumable, env, parent, next_parent_index=None, on_stop=None):
+def try_run_resumable(
+    resumable, env, parent, next_parent_index=None, on_stop_iteration=None
+):
     try:
         resumable.resume(env)
         # we should reach this when there are no more "yields" left to hit
@@ -106,8 +108,8 @@ def try_run_resumable(resumable, env, parent, next_parent_index=None, on_stop=No
     # composite child statements always raise StopIteration when they're done
     except StopIteration:
         parent.index = next_parent_index
-        if on_stop:
-            on_stop()
+        if on_stop_iteration:
+            on_stop_iteration()
 
 
 class ResumableFunction:
@@ -189,7 +191,11 @@ class ResumableWhile:
     def _execute_body(self, env):
         self.index = 1
         try_run_resumable(
-            self.body, env, parent=self, next_parent_index=0, on_stop=self.body.reset
+            self.body,
+            env,
+            parent=self,
+            next_parent_index=0,
+            on_stop_iteration=self.body.reset,
         )
 
     def _exit_loop(self):
