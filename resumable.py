@@ -3,26 +3,53 @@
 END = object()
 
 import operator
+import abc
 from collections import UserDict
 
 DEBUG = False
-# DEBUG = True
+DEBUG = True
 
 op_names = {
     operator.__add__: "+",
     operator.__eq__: "==",
     operator.__le__: "<=",
+    operator.__mod__: "mod",
 }
 
 
-def debug(message):
-    if DEBUG:
+class IndentingWriter:
+    def __init__(self, indent_size=3):
+        self.indent_size = indent_size
+        self.indents = 0
+
+    def debug(self, message):
+        if DEBUG:
+            self._print_indentation()
+            print(message, end="")
+
+    def debugln(self, message):
+        self.debug(message)
+        print()
+
+    def print(self, message):
+        self._print_indentation()
         print(message, end="")
 
+    def println(self, message):
+        self.print(message)
+        print()
 
-def debugln(message):
-    if DEBUG:
-        print(message)
+    def indent(self):
+        self.indents += 1
+
+    def dedent(self):
+        self.indents -= 1
+
+    def _print_indentation(self):
+        print(" " * self.indent_size * self.indents, end="")
+
+
+writer = IndentingWriter()
 
 
 def raise_(exception):
@@ -31,16 +58,17 @@ def raise_(exception):
 
 class Env(UserDict):
     @staticmethod
-    def new(args=None):
-        env = Env()
+    def new(args=None, name=""):
+        env = Env(name=name)
         if args:
             for key, value in args.items():
                 env.define(key, value)
         return env
 
-    def __init__(self):
+    def __init__(self, enclosing=None, name=""):
         super().__init__()
-        self.enclosing = None
+        self.enclosing = enclosing
+        self.name = name
 
     def __getitem__(self, key):
         if key in self:
@@ -53,7 +81,7 @@ class Env(UserDict):
 
     # `env.define(...)` will *add* the key and value to *this* environment
     def define(self, key, value):
-        # we could raise an exception if the variable has
+        writer.debugln(f"defining {key}={value} on env:{self.name}")
         super().__setitem__(key, value)
 
     # `env[key]=value` will just update an existing key wherever in the
@@ -68,23 +96,21 @@ class Env(UserDict):
         else:
             raise KeyError(key)
 
+    def vars(self):
+        result = {"self": list(self.items()), "parent": None, "object": self}
+        if self.enclosing is not None:
+            result["parent"] = {**self.enclosing.vars()}
+        return result
 
-class Yield:
-    def __init__(self, expr):
-        self.expr = expr
-
-    def resume(self, env):
-        raise YieldValue(self.expr.eval(env), sender=self)
-
-
-class YieldValue(Exception):
-    def __init__(self, value, sender):
-        self.value = value
-        # we use `sender` to identify when to advance the instruction index in
-        # parent statements, since "yield" statements don't throw `StopIteration`
-        # (the other way in which parent statements know when to advance their
-        # instruction pointer)
-        self.sender = sender
+    def vars_repr(self):
+        chain = self.vars()
+        result = ""
+        while chain:
+            result += f"{chain['self']}:{chain['object'].name}"
+            chain = chain["parent"]
+            if chain:
+                result += " -> "
+        return result
 
 
 def try_run_resumable(
@@ -112,22 +138,82 @@ def try_run_resumable(
             on_stop_iteration()
 
 
-class ResumableFunction:
-    def __init__(self, body, args=None):
+class Resumable(abc.ABC):
+    def __init__(self, children=None, name=None):
+        self.name = name or ""
+        self.children = children or list()
+        self.index = 0
+
+    @abc.abstractmethod
+    def resume(self, env):
+        pass
+
+    def reset(self, first_time=False):
+        # debugln(f"resetting {self.name}")
+        self.index = 0
+        for child in self.children:
+            # some children are optional for some statements
+            if child and not first_time:
+                # becase each statement calls `reset(first_time=True)` in their
+                # constructor, there is no need to reset again if it's the first
+                # time
+                child.reset()
+
+    def exit(self, env):
+        self.index = None
+        raise StopIteration
+
+    def __repr__(self):
+        return self.name.upper()
+
+
+class Yield(Resumable):
+    def __init__(self, expr):
+        super().__init__(name="yield")
+        self.expr = expr
+
+    def resume(self, env):
+        value = self.expr.eval(env)
+        _yield = YieldValue(value, sender=self)
+        writer.debug(f"yield ({value})")
+        raise _yield
+
+
+class YieldValue(Exception):
+    def __init__(self, value, sender):
+        self.value = value
+        # we use `sender` to identify when to advance the instruction index in
+        # parent statements, since "yield" statements don't throw `StopIteration`
+        # (the other way in which parent statements know when to advance their
+        # instruction pointer)
+        self.sender = sender
+
+
+# TODO:
+# + implement `call` so it always returns an indepedent clone
+class ResumableFunction(Resumable):
+    def __init__(self, params, body, args=None, name=""):
+        assert isinstance(
+            body, ResumableBlock
+        ), "function body can only be a `ResumableBlock`"
+
+        super().__init__(name=name, children=body)
+
         self.body = body
+        self.params = params
         # bind arguments to parameters in a fresh environment
-        self.env = Env.new(args)
+        self.env = Env.new(args, name=self.name)
         self.yield_value = None
 
     def resume(self, env):
         if self.yield_value is END:
-            debug(f"resumable is exhausted!")
+            writer.debug(f"resumable is exhausted!")
             raise StopIteration
 
         try:
             # make sure that outer environments are reachable
             self.env.enclosing = env
-            debugln(f"resuming function...")
+            writer.debugln(f"resuming function...")
             self.body.resume(self.env)
 
         except YieldValue as _yield:
@@ -138,43 +224,76 @@ class ResumableFunction:
             self.yield_value = END
             raise stop
 
+    def restart(self):
+        raise ValueError("`ResumableFunction`s cannot be restarted!")
 
-class ResumableBlock:
-    def __init__(self, stmts, name=""):
-        self.name = name
+
+class ResumableBlock(Resumable):
+    def __init__(self, stmts, name="block", own_environment=True):
+        super().__init__(name=name, children=stmts)
 
         # ast
         self.stmts = stmts
 
         # state machine
-        self.index = 0
+        self.own_environment = own_environment
+        self.reset(first_time=True)
 
     def resume(self, env):
-        debugln(f"executing block: {self.name}")
-        while self.index < len(self.stmts):
-            debugln(f"executing statement {self.index}: ")
-            stmt = self.stmts[self.index]
-            try_run_resumable(stmt, env, parent=self, next_parent_index=self.index + 1)
+        try:
+            writer.indent()
+            self._resume(env)
+        finally:
+            writer.dedent()
 
+    def _resume(self, env):
+        if self.env is not None:
+            self.env.enclosing = env
+            env = self.env
+
+        if self.index < len(self.stmts):
+            writer.debugln(f"executing ({self.name}:block) in env ({env.vars_repr()})")
+
+        while self.index < len(self.stmts):
+            stmt = self.stmts[self.index]
+            writer.debugln(f"[{self.index}]({stmt.name}): ")
+            try:
+                writer.indent()
+                try_run_resumable(
+                    stmt, env, parent=self, next_parent_index=self.index + 1
+                )
+            finally:
+                writer.dedent()
+
+        writer.debugln(f"({self.name}:block) completed")
         raise StopIteration
 
-    def reset(self):
-        debugln(f"restarting block execution: {self.name}")
-        self.index = 0
+    def reset(self, first_time=False):
+        super().reset(first_time)
+
+        if first_time:
+            writer.debugln(f"setting up {self.name} block")
+        else:
+            writer.debugln(f"resetting {self.name} block")
+
+        self.env = None
+        if self.own_environment:
+            self.env = Env.new(name=self.name)
 
 
-class ResumableWhile:
-    def __init__(self, condition, body):
+class ResumableWhile(Resumable):
+    def __init__(self, condition, body, name="while"):
+        super().__init__(name=name, children=[body])
+
         # ast
         self.condition = condition
         self.body = body
 
         # state machine
-        self.index = 0
         self.instructions = {
             0: self._execute_condition,
             1: self._execute_body,
-            None: (lambda env: raise_(StopIteration())),
+            None: self.exit,
         }
 
     def resume(self, env):
@@ -182,11 +301,15 @@ class ResumableWhile:
             self.instructions[self.index](env)
 
     def _execute_condition(self, env):
-        debugln("evaluating while condition...")
+        writer.debugln(f"evaluating condition ({self.name})...")
         if self.condition.eval(env):
-            self._execute_body(env)
+            try:
+                writer.indent()
+                self._execute_body(env)
+            finally:
+                writer.dedent()
         else:
-            self._exit_loop()
+            self.exit(env)
 
     def _execute_body(self, env):
         self.index = 1
@@ -198,15 +321,12 @@ class ResumableWhile:
             on_stop_iteration=self.body.reset,
         )
 
-    def _exit_loop(self):
-        debugln("exiting while...")
-        self.index = None
-        raise StopIteration
 
-
-class ResumableIf:
-    def __init__(self, condition, then, else_=None):
+class ResumableIf(Resumable):
+    def __init__(self, condition, then, else_=None, name="if"):
         assert then is not None, "then branch is not optional"
+
+        super().__init__(name=name, children=[then, else_])
 
         # ast
         self.condition = condition
@@ -214,49 +334,53 @@ class ResumableIf:
         self.else_ = else_
 
         # state machine
-        self.index = 0
-        self.condition_value = None
         self.instructions = {
             0: self._execute_condition,
             1: self._execute_if_branch,
             2: self._execute_else_branch,
-            None: (lambda env: raise_(StopIteration())),
+            None: self.exit,
         }
+        self.reset(first_time=True)
 
     def resume(self, env):
         self.instructions[self.index](env)
-        # this flow of control may happen if there is no "else" branch,
-        # and the condition turned out to be false
-        self.index = None
-        raise StopIteration
 
     def _execute_condition(self, env):
         if self.condition_value is None:
-            debugln("evaluating if condition...")
+            writer.debugln(f"evaluating condition ({self.name}): ")
             self.condition_value = self.condition.eval(env)
 
         if self.condition_value:
             self._execute_if_branch(env)
+
         elif self.else_:
             self._execute_else_branch(env)
 
+        else:
+            self.exit(env)
+
     def _execute_if_branch(self, env):
         self.index = 1
-        debugln("then branch")
+        writer.debugln("then branch")
         try_run_resumable(self.then, env, parent=self, next_parent_index=None)
 
     def _execute_else_branch(self, env):
         self.index = 2
-        debugln("else branch")
+        writer.debugln("else branch")
         try_run_resumable(self.else_, env, parent=self, next_parent_index=None)
 
+    def reset(self, first_time=False):
+        super().reset(first_time)
+        self.condition_value = None
 
-class Print:
+
+class Print(Resumable):
     def __init__(self, expr):
+        super().__init__(name="print")
         self.expr = expr
 
     def resume(self, env):
-        print(f"printing {self.expr.eval(env)}")
+        writer.println(f"printing {self.expr.eval(env)}")
 
 
 class Var:
@@ -291,17 +415,25 @@ class Binary:
         left_value = self.left.eval(env)
         right_value = self.right.eval(env)
 
-        debug(
-            f"({self.left}={left_value}) {op_names[self.op]} ({self.right}={right_value})"
+        writer.debugln(
+            f"[({self.left}={left_value}) {op_names[self.op]} ({self.right}={right_value})"
+            + f" => {self.op(left_value, right_value)}]"
         )
-        debugln(f" => {self.op(left_value, right_value)}")
 
         return self.op(left_value, right_value)
+
+    def __repr__(self):
+        return op_names[self.op]
 
 
 class Equals(Binary):
     def __init__(self, left, right):
         super().__init__(left, right, operator.__eq__)
+
+
+class Mod(Binary):
+    def __init__(self, left, right):
+        super().__init__(left, right, operator.__mod__)
 
 
 class LessEquals(Binary):
@@ -314,38 +446,38 @@ class Sum(Binary):
         super().__init__(left, right, operator.__add__)
 
 
-class Assign:
+class Assign(Resumable):
     def __init__(self, var, expr):
+        super().__init__(name="assign")
         self.var = var
         self.expr = expr
 
     def resume(self, env):
         env[self.var.name] = self.expr.eval(env)
-        print(f"assigning {self.var.name} = {env[self.var.name]}")
+        writer.println(f"assigning {self.var.name} = {env[self.var.name]}")
 
 
-class Define:
+class Define(Resumable):
     def __init__(self, var_name, initializer):
+        super().__init__(name="define")
         self.var_name = var_name
         self.initializer = initializer
 
     def resume(self, env):
         env.define(self.var_name, self.initializer.eval(env))
-        print(f"defining {self.var_name} = {env[self.var_name]}")
 
 
 def iterate(resumable, env):
     try:
         while True:
-            print(f"yield --> [{resumable.resume(env)}]")
-            print()
+            writer.println(f" --> [{resumable.resume(env)}]")
     except StopIteration:
         pass
 
 
-print("-" * 80)
-print("generator with conditionals and nested blocks")
-print("-" * 80)
+writer.println("-" * 80)
+writer.println("generator with conditionals and nested blocks")
+writer.println("-" * 80)
 
 env = Env.new({"globals": "fibonacci"})
 #
@@ -371,7 +503,8 @@ env = Env.new({"globals": "fibonacci"})
 # }
 #
 fib = ResumableFunction(
-    ResumableBlock(
+    params=[Var("n")],
+    body=ResumableBlock(
         [
             Define("i", Literal(0)),
             Print(Var("globals")),
@@ -400,16 +533,18 @@ fib = ResumableFunction(
             Yield(Sum(Var("i"), Var("n"))),
         ],
         name="func body",
+        own_environment=False,
     ),
     args={"n": 0},
+    name="upto",
 )
-iterate(fib, env)
+# iterate(fib, env)
 
-print("-" * 80)
-print("generator with while")
-print("-" * 80)
+writer.println("-" * 80)
+writer.println("generator with while")
+writer.println("-" * 80)
 
-env = Env.new()
+env = Env.new(name="global")
 # for (item : upto(5)) {
 #    println(item)
 # }
@@ -417,24 +552,48 @@ env = Env.new()
 # fun upto(n) {
 #    var i = 0
 #    while(i <= n) {
-#       yield i
+#       var j = i + 1
+#       yield j
+#       if (i % 2 == 0) {
+#          var z = 0
+#          println("i was even")
+#          yield i + j
+#       }
 #       i = i + 1
 #    }
 # }
 upto = ResumableFunction(
-    ResumableBlock(
+    params=[Var("n")],
+    body=ResumableBlock(
         [
             Define("i", Literal(0)),
             ResumableWhile(
                 LessEquals(Var("i"), Var("n")),
                 body=ResumableBlock(
-                    [Yield(Var("i")), Assign(Var("i"), Sum(Var("i"), Literal(1)))],
-                    name="while-body",
+                    [
+                        Define("j", Sum(Var("i"), Literal(1))),
+                        Yield(Var("j")),
+                        ResumableIf(
+                            Equals(Mod(Var("i"), Literal(2)), Literal(0)),
+                            ResumableBlock(
+                                [
+                                    Define("z", Literal(0)),
+                                    Print(Literal("i was even")),
+                                    Yield(Sum(Var("i"), Var("j"))),
+                                ],
+                                name="then",
+                            ),
+                        ),
+                        Assign(Var("i"), Sum(Var("i"), Literal(1))),
+                    ],
+                    name="while",
                 ),
             ),
         ],
-        name="func-body",
+        own_environment=False,
+        name="function",
     ),
     args={"n": 5},
+    name="upto",
 )
 iterate(upto, env)
