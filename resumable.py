@@ -2,13 +2,17 @@
 
 END = object()
 
-from collections import UserDict
-
-# from goto import with_goto
 import operator
+from collections import UserDict
 
 DEBUG = False
 # DEBUG = True
+
+op_names = {
+    operator.__add__: "+",
+    operator.__eq__: "==",
+    operator.__le__: "<=",
+}
 
 
 def debug(message):
@@ -21,25 +25,48 @@ def debugln(message):
         print(message)
 
 
+def raise_(exception):
+    raise exception
+
+
 class Env(UserDict):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+    @staticmethod
+    def new(args=None):
+        env = Env()
+        if args:
+            for key, value in args.items():
+                env.define(key, value)
+        return env
+
+    def __init__(self):
+        super().__init__()
         self.enclosing = None
 
     def __getitem__(self, key):
         if key in self:
             return super().__getitem__(key)
 
-        if self.enclosing is None:
+        if self.enclosing:
+            return self.enclosing[key]
+
+        raise KeyError(key)
+
+    # `env.define(...)` will *add* the key and value to *this* environment
+    def define(self, key, value):
+        # we could raise an exception if the variable has
+        super().__setitem__(key, value)
+
+    # `env[key]=value` will just update an existing key wherever in the
+    # environments' chain it is found (or raise an error if not found)
+    def __setitem__(self, key, value):
+        if key in self:
+            super().__setitem__(key, value)
+
+        elif self.enclosing:
+            self.enclosing[key] = value
+
+        else:
             raise KeyError(key)
-
-        return self.enclosing[key]
-
-
-class YieldValue(Exception):
-    def __init__(self, value, sender):
-        self.value = value
-        self.sender = sender
 
 
 class Yield:
@@ -50,11 +77,44 @@ class Yield:
         raise YieldValue(self.expr.eval(env), sender=self)
 
 
+class YieldValue(Exception):
+    def __init__(self, value, sender):
+        self.value = value
+        # we use `sender` to identify when to advance the instruction index in
+        # parent statements, since "yield" statements don't throw `StopIteration`
+        # (the other way in which parent statements know when to advance their
+        # instruction pointer)
+        self.sender = sender
+
+
+def try_run_resumable(resumable, env, parent, next_parent_index=None, on_stop=None):
+    try:
+        resumable.resume(env)
+        # we should reach this when there are no more "yields" left to hit
+        # in the current context of the descendants of `resumable`
+        parent.index = next_parent_index
+
+    except YieldValue as _yield:
+        # if the yield originated in an immediate child atomic statement,
+        # move on to next statement immediately but there is
+        if _yield.sender is resumable:
+            parent.index = next_parent_index
+        # propagate the yield so ancestor resumables can potentially advance
+        # their instruction indexes
+        raise _yield
+
+    # composite child statements always raise StopIteration when they're done
+    except StopIteration:
+        parent.index = next_parent_index
+        if on_stop:
+            on_stop()
+
+
 class ResumableFunction:
     def __init__(self, body, args=None):
         self.body = body
         # bind arguments to parameters in a fresh environment
-        self.env = Env(args) if args else Env()
+        self.env = Env.new(args)
         self.yield_value = None
 
     def resume(self, env):
@@ -77,31 +137,14 @@ class ResumableFunction:
             raise stop
 
 
-def try_run_resumable(resumable, env, parent, next_parent_index=None):
-    try:
-        resumable.resume(env)
-        # we should reach this when there are no more yields left to hit
-        # in the current context of the descendants of `resumable`
-        parent.index = next_parent_index
-
-    except YieldValue as _yield:
-        # if the yield originated in an immediate child atomic statement,
-        # move on to next statement immediately but there is
-        if _yield.sender is resumable:
-            parent.index = next_parent_index
-        # propagate the yield so ancestor resumables can potentially advance
-        # their instruction indexes
-        raise _yield
-
-    # composite child statements always raise StopIteration when they're done
-    except StopIteration:
-        parent.index = next_parent_index
-
-
 class ResumableBlock:
     def __init__(self, stmts, name=""):
-        self.stmts = stmts
         self.name = name
+
+        # ast
+        self.stmts = stmts
+
+        # state machine
         self.index = 0
 
     def resume(self, env):
@@ -113,46 +156,94 @@ class ResumableBlock:
 
         raise StopIteration
 
+    def reset(self):
+        debugln(f"restarting block execution: {self.name}")
+        self.index = 0
 
-def raise_(exception):
-    raise exception
+
+class ResumableWhile:
+    def __init__(self, condition, body):
+        # ast
+        self.condition = condition
+        self.body = body
+
+        # state machine
+        self.index = 0
+        self.condition_value = None
+        self.instructions = {
+            0: self._execute_condition,
+            1: self._execute_body,
+            None: (lambda env: raise_(StopIteration())),
+        }
+
+    def resume(self, env):
+        while True:
+            self.instructions[self.index](env)
+
+    def _execute_condition(self, env):
+        debugln("evaluating while condition...")
+        if self.condition.eval(env):
+            self._execute_body(env)
+        else:
+            self._exit_loop()
+
+    def _execute_body(self, env):
+        self.index = 1
+        try_run_resumable(
+            self.body, env, parent=self, next_parent_index=0, on_stop=self.body.reset
+        )
+
+    def _exit_loop(self):
+        debugln("exiting while...")
+        self.index = None
+        raise StopIteration
 
 
 class ResumableIf:
-    def __init__(self, condition, _then, _else=None):
-        assert _then is not None, "_then branch is not optional"
+    def __init__(self, condition, then, else_=None):
+        assert then is not None, "then branch is not optional"
 
+        # ast
         self.condition = condition
+        self.then = then
+        self.else_ = else_
+
+        # state machine
+        self.index = 0
         self.condition_value = None
         self.instructions = {
-            0: self.if_branch,
-            1: self.else_branch,
+            0: self._execute_condition,
+            1: self._execute_if_branch,
+            2: self._execute_else_branch,
             None: (lambda env: raise_(StopIteration())),
         }
-        self.index = 0
-        self._then = _then
-        self._else = _else
 
     def resume(self, env):
+        self.instructions[self.index](env)
+        # this flow of control may happen if there is no "else" branch,
+        # and the condition turned out to be false
+        self.index = None
+        raise StopIteration
+
+    def _execute_condition(self, env):
         if self.condition_value is None:
             debugln("evaluating if condition...")
             self.condition_value = self.condition.eval(env)
 
-        self.instructions[self.index](env)
-        raise StopIteration
+        if self.condition_value:
+            self._execute_if_branch(env)
+        elif self.else_:
+            self._execute_else_branch(env)
 
-    def if_branch(self, env):
-        if not self.condition_value:
-            self.else_branch(env)
-        else:
-            debugln("then branch")
-            try_run_resumable(self._then, env, parent=self, next_parent_index=None)
-
-    def else_branch(self, env):
+    def _execute_if_branch(self, env):
         self.index = 1
+        debugln("then branch")
+        try_run_resumable(self.then, env, parent=self, next_parent_index=None)
+
+    def _execute_else_branch(self, env):
+        self.index = 2
         debugln("else branch")
-        if self._else:
-            try_run_resumable(self._else, env, parent=self, next_parent_index=None)
+        try_run_resumable(self.else_, env, parent=self, next_parent_index=None)
 
 
 class Print:
@@ -185,12 +276,6 @@ class Literal:
         return str(self.value)
 
 
-op_names = {
-    operator.__add__: "+",
-    operator.__eq__: "==",
-}
-
-
 class Binary:
     def __init__(self, left, right, op):
         self.left = left
@@ -214,22 +299,50 @@ class Equals(Binary):
         super().__init__(left, right, operator.__eq__)
 
 
+class LessEquals(Binary):
+    def __init__(self, left, right):
+        super().__init__(left, right, operator.__le__)
+
+
 class Sum(Binary):
     def __init__(self, left, right):
         super().__init__(left, right, operator.__add__)
 
 
+class Assign:
+    def __init__(self, var, expr):
+        self.var = var
+        self.expr = expr
+
+    def resume(self, env):
+        env[self.var.name] = self.expr.eval(env)
+        print(f"assigning {self.var.name} = {env[self.var.name]}")
+
+
 class Define:
-    def __init__(self, name, initializer):
-        self.name = name
+    def __init__(self, var_name, initializer):
+        self.var_name = var_name
         self.initializer = initializer
 
     def resume(self, env):
-        env[self.name] = self.initializer.eval(env)
-        print(f"defining {self.name} = {env[self.name]}")
+        env.define(self.var_name, self.initializer.eval(env))
+        print(f"defining {self.var_name} = {env[self.var_name]}")
 
 
-env = Env({"globals": "globals"})
+def iterate(resumable, env):
+    try:
+        while True:
+            print(f"yield --> [{resumable.resume(env)}]")
+            print()
+    except StopIteration:
+        pass
+
+
+print("-" * 80)
+print("generator with conditionals and nested blocks")
+print("-" * 80)
+
+env = Env.new({"globals": "fibonacci"})
 #
 # for (item : fib(0)) {
 #    println(item)
@@ -239,16 +352,15 @@ env = Env({"globals": "globals"})
 #    var i = 0
 #    println(globals)
 #    if (n == 0) {
-#       yield "> zero"
+#       yield "> n == 0"
 #       println(n)
-#       yield "> one"
+#       yield "> printed n"
 #       if (i == 1) {
-#          yield ">> one"
-#          println(">> deep in the trenches")
-#          yield ">> two
-#       } else {
-#          yield "> two"
-#       }
+#          yield ">> i == 1"
+#          println(">> two levels deep")
+#          yield ">> after printing"
+#       } else
+#          yield ">> i != 1"
 #    }
 #    yield i + n
 # }
@@ -262,19 +374,19 @@ fib = ResumableFunction(
                 Equals(Var("n"), Literal(0)),
                 ResumableBlock(
                     [
-                        Yield(Literal("> zero")),
+                        Yield(Literal("> n == 0")),
                         Print(Var("n")),
-                        Yield(Literal("> one")),
+                        Yield(Literal("> printed n")),
                         ResumableIf(
                             Equals(Var("i"), Literal(1)),
                             ResumableBlock(
                                 [
-                                    Yield(Literal(">> one")),
-                                    Print(Literal(">> deep in the trenches")),
-                                    Yield(Literal(">> two")),
+                                    Yield(Literal(">> i == 1")),
+                                    Print(Literal(">> two levels deep")),
+                                    Yield(Literal(">> after printing")),
                                 ]
                             ),
-                            Yield(Literal("> two")),
+                            else_=Yield(Literal(">> i != 1")),
                         ),
                     ],
                     name="then-branch",
@@ -284,11 +396,40 @@ fib = ResumableFunction(
         ],
         name="func body",
     ),
-    {"n": 0},
+    args={"n": 0},
 )
-try:
-    while True:
-        print(f"yield --> [{fib.resume(env)}]")
-        print()
-except StopIteration:
-    pass
+iterate(fib, env)
+
+print("-" * 80)
+print("generator with while")
+print("-" * 80)
+
+env = Env.new()
+# for (item : upto(5)) {
+#    println(item)
+# }
+#
+# fun upto(n) {
+#    var i = 0
+#    while(i <= n) {
+#       yield i
+#       i = i + 1
+#    }
+# }
+upto = ResumableFunction(
+    ResumableBlock(
+        [
+            Define("i", Literal(0)),
+            ResumableWhile(
+                LessEquals(Var("i"), Var("n")),
+                body=ResumableBlock(
+                    [Yield(Var("i")), Assign(Var("i"), Sum(Var("i"), Literal(1)))],
+                    name="while-body",
+                ),
+            ),
+        ],
+        name="func-body",
+    ),
+    args={"n": 5},
+)
+iterate(upto, env)
