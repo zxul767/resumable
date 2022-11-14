@@ -169,7 +169,6 @@ class ResumableWhile:
 
         # state machine
         self.index = 0
-        self.condition_value = None
         self.instructions = {
             0: self._execute_condition,
             1: self._execute_body,
