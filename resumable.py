@@ -175,7 +175,10 @@ class Yield(Resumable):
     def resume(self, env):
         value = self.expr.eval(env)
         _yield = YieldValue(value, sender=self)
-        writer.debug(f"yield ({value})")
+        if isinstance(value, str):
+            writer.debug(f"yield ('{value}')")
+        else:
+            writer.debug(f"yield ({value})")
         raise _yield
 
 
@@ -402,6 +405,8 @@ class Literal:
         return self.value
 
     def __str__(self):
+        if isinstance(self.value, str):
+            return f"'{self.value}'"
         return str(self.value)
 
 
@@ -470,7 +475,11 @@ class Define(Resumable):
 def iterate(resumable, env):
     try:
         while True:
-            writer.println(f" --> [{resumable.resume(env)}]")
+            value = resumable.resume(env)
+            if isinstance(value, str):
+                writer.println(f" --> ['{value}']")
+            else:
+                writer.println(f" --> [{value}]")
     except StopIteration:
         pass
 
@@ -479,7 +488,7 @@ writer.println("-" * 80)
 writer.println("generator with conditionals and nested blocks")
 writer.println("-" * 80)
 
-env = Env.new({"globals": "fibonacci"})
+env = Env.new({"fib": "<fn ...>"}, name="global")
 #
 # for (item : fib(0)) {
 #    println(item)
@@ -507,7 +516,7 @@ fib = ResumableFunction(
     body=ResumableBlock(
         [
             Define("i", Literal(0)),
-            Print(Var("globals")),
+            Print(Var("fib")),
             ResumableIf(
                 Equals(Var("n"), Literal(0)),
                 ResumableBlock(
@@ -527,18 +536,18 @@ fib = ResumableFunction(
                             else_=Yield(Literal(">> i != 1")),
                         ),
                     ],
-                    name="then-branch",
+                    name="then",
                 ),
             ),
             Yield(Sum(Var("i"), Var("n"))),
         ],
-        name="func body",
+        name="function",
         own_environment=False,
     ),
     args={"n": 0},
-    name="upto",
+    name="fib",
 )
-# iterate(fib, env)
+iterate(fib, env)
 
 writer.println("-" * 80)
 writer.println("generator with while")
