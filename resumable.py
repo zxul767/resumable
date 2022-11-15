@@ -1,10 +1,7 @@
 #!/usr/bin/env python3
 
-END = object()
-
 import operator
 import abc
-from collections import UserDict
 from contextlib import contextmanager
 
 DEBUG = False
@@ -73,18 +70,14 @@ def indented_output(writer):
 
 
 class Env:
-    @staticmethod
-    def new(args=None, name=""):
-        env = Env(name=name)
-        if args:
-            for key, value in args.items():
-                env.define(key, value)
-        return env
-
-    def __init__(self, enclosing=None, name=""):
+    def __init__(self, args=None, enclosing=None, name=""):
         self.enclosing = enclosing
         self.name = name
         self.key_values = dict()
+
+        if args:
+            for key, value in args.items():
+                env.define(key, value)
 
     def __getitem__(self, key):
         if key in self.key_values:
@@ -158,6 +151,10 @@ class Expr(abc.ABC):
     def eval(self, env):
         pass
 
+    # expressions do not have `clone` methods like "resumables" because they're
+    # not supposed to implement mutable state; anything with mutable state or
+    # side-effects should be a statement
+
 
 class Resumable(abc.ABC):
     def __init__(self, children=None, name=None):
@@ -166,17 +163,35 @@ class Resumable(abc.ABC):
         # all "resumables" start at `index=0`
         self.index = 0
 
+    # all "resumables" should support cloning so we can have independent
+    # generators (if a statement has no mutable state, it is safe for them
+    # to avoid making actual copies and simply return themselves)
+    @abc.abstractmethod
+    def clone(self):
+        # TODO: most cloning methods simply call their respective class constructors
+        # with clones of their mutable children; would it be possible to hoist that
+        # logic to this class by having `children` (which are assumed to always be
+        # statements) and `state_machine`? or is this overkill and not worth it?
+        #
+        # TODO: should we validate that `clone` can only be invoked for statements in
+        # their initial state? is there feature we'd be giving up by enforcing that
+        # constraint?
+        pass
+
     # all "resumables" should support resuming in a given environment
     @abc.abstractmethod
     def resume(self, env):
         pass
 
+    # all "resumables" should support stopping
     def exit(self, env):
         # all "resumables" end at `index=None`, which is a terminal state
         # that always raises `StopIteration` (at least until being resetted)
         self.index = None
         raise StopIteration
 
+    # most "resumables" should support being resetted (`ResumableFunction` is
+    # arguably an exception)
     def reset(self, first_time=False):
         writer.debugln(
             "{0} {1} block".format(
@@ -196,10 +211,6 @@ class Resumable(abc.ABC):
     def __repr__(self):
         return self.name.upper()
 
-    @abc.abstractmethod
-    def clone(self):
-        pass
-
 
 class Yield(Resumable):
     def __init__(self, expr):
@@ -214,7 +225,8 @@ class Yield(Resumable):
         raise _yield
 
     def clone(self):
-        return Yield(self.expr)
+        # we can return the same object since it has no mutable state
+        return self
 
 
 class YieldValue(Exception):
@@ -248,7 +260,7 @@ class ResumableFunction(Resumable):
         self._validate_call_args(args)
         _clone = self.clone()
         # bind arguments to parameters in a fresh environment
-        _clone.env = Env.new(args, name=self.name)
+        _clone.env = Env(args, name=self.name)
         return _clone
 
     def resume(self, env):
@@ -336,7 +348,7 @@ class ResumableBlock(Resumable):
 
         self.env = None
         if self.own_environment:
-            self.env = Env.new(name=self.name)
+            self.env = Env(name=self.name)
 
 
 class ResumableWhile(Resumable):
@@ -565,7 +577,7 @@ writer.println("-" * 80)
 writer.println("range_ generator")
 writer.println("-" * 80)
 
-env = Env.new(name="global")
+env = Env(name="global")
 # for (item : range_(5)) {
 #    println(item)
 # }
