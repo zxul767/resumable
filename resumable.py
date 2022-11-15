@@ -5,9 +5,10 @@ END = object()
 import operator
 import abc
 from collections import UserDict
+from contextlib import contextmanager
 
 DEBUG = False
-DEBUG = True
+# DEBUG = True
 
 op_names = {
     operator.__add__: "+",
@@ -19,8 +20,8 @@ op_names = {
 
 class IndentingWriter:
     def __init__(self, indent_size=3):
-        self.indent_size = indent_size
-        self.indents = 0
+        self._indent_size = indent_size
+        self._indents = 0
 
     def debug(self, message):
         if DEBUG:
@@ -28,8 +29,9 @@ class IndentingWriter:
             print(message, end="")
 
     def debugln(self, message):
-        self.debug(message)
-        print()
+        if DEBUG:
+            self.debug(message)
+            print()
 
     def print(self, message):
         self._print_indentation()
@@ -40,23 +42,37 @@ class IndentingWriter:
         print()
 
     def indent(self):
-        self.indents += 1
+        if DEBUG:
+            self._indents += 1
 
     def dedent(self):
-        self.indents -= 1
+        if DEBUG:
+            self._indents -= 1
 
     def _print_indentation(self):
-        print(" " * self.indent_size * self.indents, end="")
+        if DEBUG:
+            print(" " * self._indent_size * self._indents, end="")
 
 
 writer = IndentingWriter()
 
 
-def raise_(exception):
-    raise exception
+def repr_string(value):
+    if isinstance(value, str):
+        return f"'{value}'"
+    return str(value)
 
 
-class Env(UserDict):
+@contextmanager
+def indented_output(writer):
+    writer.indent()
+    try:
+        yield
+    finally:
+        writer.dedent()
+
+
+class Env:
     @staticmethod
     def new(args=None, name=""):
         env = Env(name=name)
@@ -66,13 +82,13 @@ class Env(UserDict):
         return env
 
     def __init__(self, enclosing=None, name=""):
-        super().__init__()
         self.enclosing = enclosing
         self.name = name
+        self.key_values = dict()
 
     def __getitem__(self, key):
-        if key in self:
-            return super().__getitem__(key)
+        if key in self.key_values:
+            return self.key_values[key]
 
         if self.enclosing:
             return self.enclosing[key]
@@ -82,13 +98,13 @@ class Env(UserDict):
     # `env.define(...)` will *add* the key and value to *this* environment
     def define(self, key, value):
         writer.debugln(f"defining {key}={value} on env:{self.name}")
-        super().__setitem__(key, value)
+        self.key_values[key] = value
 
     # `env[key]=value` will just update an existing key wherever in the
     # environments' chain it is found (or raise an error if not found)
     def __setitem__(self, key, value):
-        if key in self:
-            super().__setitem__(key, value)
+        if key in self.key_values:
+            self.key_values[key] = value
 
         elif self.enclosing:
             self.enclosing[key] = value
@@ -96,14 +112,14 @@ class Env(UserDict):
         else:
             raise KeyError(key)
 
-    def vars(self):
-        result = {"self": list(self.items()), "parent": None, "object": self}
+    def all_vars(self):
+        result = {"self": list(self.key_values.items()), "parent": None, "object": self}
         if self.enclosing is not None:
-            result["parent"] = {**self.enclosing.vars()}
+            result["parent"] = {**self.enclosing.all_vars()}
         return result
 
-    def vars_repr(self):
-        chain = self.vars()
+    def __repr__(self):
+        chain = self.all_vars()
         result = ""
         while chain:
             result += f"{chain['self']}:{chain['object'].name}"
@@ -124,47 +140,65 @@ def try_run_resumable(
 
     except YieldValue as _yield:
         # if the yield originated in an immediate child atomic statement,
-        # move on to next statement immediately but there is
+        # move on to next statement
         if _yield.sender is resumable:
             parent.index = next_parent_index
-        # propagate the yield so ancestor resumables can potentially advance
-        # their instruction indexes
         raise _yield
 
-    # composite child statements always raise StopIteration when they're done
+    # composite child statements always raise `StopIteration` when they're done
     except StopIteration:
         parent.index = next_parent_index
         if on_stop_iteration:
             on_stop_iteration()
 
 
+class Expr(abc.ABC):
+    # all expressions should support evaluation
+    @abc.abstractmethod
+    def eval(self, env):
+        pass
+
+
 class Resumable(abc.ABC):
     def __init__(self, children=None, name=None):
         self.name = name or ""
-        self.children = children or list()
+        self.children = children
+        # all "resumables" start at `index=0`
         self.index = 0
 
+    # all "resumables" should support resuming in a given environment
     @abc.abstractmethod
     def resume(self, env):
         pass
 
-    def reset(self, first_time=False):
-        # debugln(f"resetting {self.name}")
-        self.index = 0
-        for child in self.children:
-            # some children are optional for some statements
-            if child and not first_time:
-                # becase each statement calls `reset(first_time=True)` in their
-                # constructor, there is no need to reset again if it's the first
-                # time
-                child.reset()
-
     def exit(self, env):
+        # all "resumables" end at `index=None`, which is a terminal state
+        # that always raises `StopIteration` (at least until being resetted)
         self.index = None
         raise StopIteration
 
+    def reset(self, first_time=False):
+        writer.debugln(
+            "{0} {1} block".format(
+                "setting up" if first_time else "resetting", self.name
+            )
+        )
+        self.index = 0
+        if not first_time:
+            self._reset_children()
+
+    def _reset_children(self):
+        for child in self.children or []:
+            # some children are optional for some statements
+            if child:
+                child.reset()
+
     def __repr__(self):
         return self.name.upper()
+
+    @abc.abstractmethod
+    def clone(self):
+        pass
 
 
 class Yield(Resumable):
@@ -174,12 +208,13 @@ class Yield(Resumable):
 
     def resume(self, env):
         value = self.expr.eval(env)
+        writer.debug(repr_string(value))
+
         _yield = YieldValue(value, sender=self)
-        if isinstance(value, str):
-            writer.debug(f"yield ('{value}')")
-        else:
-            writer.debug(f"yield ({value})")
         raise _yield
+
+    def clone(self):
+        return Yield(self.expr)
 
 
 class YieldValue(Exception):
@@ -192,26 +227,36 @@ class YieldValue(Exception):
         self.sender = sender
 
 
-# TODO:
-# + implement `call` so it always returns an indepedent clone
 class ResumableFunction(Resumable):
-    def __init__(self, params, body, args=None, name=""):
+    def __init__(self, params, body, name=""):
         assert isinstance(
             body, ResumableBlock
         ), "function body can only be a `ResumableBlock`"
 
         super().__init__(name=name, children=body)
 
-        self.body = body
         self.params = params
+        self.body = body
+        self.env = None
+
+    def clone(self):
+        return ResumableFunction(
+            params=self.params, body=self.body.clone(), name=self.name
+        )
+
+    def new(self, args=None):
+        self._validate_call_args(args)
+        _clone = self.clone()
         # bind arguments to parameters in a fresh environment
-        self.env = Env.new(args, name=self.name)
-        self.yield_value = None
+        _clone.env = Env.new(args, name=self.name)
+        return _clone
 
     def resume(self, env):
-        if self.yield_value is END:
-            writer.debug(f"resumable is exhausted!")
-            raise StopIteration
+        if self.env is None:
+            raise ValueError("`call` needs to be invoked to generate a new instance!")
+
+        if self.index is None:
+            self.exit(env)
 
         try:
             # make sure that outer environments are reachable
@@ -220,15 +265,21 @@ class ResumableFunction(Resumable):
             self.body.resume(self.env)
 
         except YieldValue as _yield:
-            self.yield_value = _yield.value
-            return self.yield_value
+            return _yield.value
 
         except StopIteration as stop:
-            self.yield_value = END
-            raise stop
+            self.exit(env)
 
     def restart(self):
         raise ValueError("`ResumableFunction`s cannot be restarted!")
+
+    def _validate_call_args(self, args):
+        if not isinstance(args, dict):
+            raise ValueError("Expected arguments as a dictionary")
+
+        missing = set([param.name for param in self.params]) - set(args.keys())
+        if missing:
+            raise ValueError(f"Required arguments are missing: {list(missing)}")
 
 
 class ResumableBlock(Resumable):
@@ -242,42 +293,46 @@ class ResumableBlock(Resumable):
         self.own_environment = own_environment
         self.reset(first_time=True)
 
+    def clone(self):
+        return ResumableBlock(
+            stmts=[stmt.clone() for stmt in self.stmts],
+            name=self.name,
+            own_environment=self.own_environment,
+        )
+
     def resume(self, env):
-        try:
-            writer.indent()
+        if self.index is None:
+            self.exit(env)
+
+        with indented_output(writer):
             self._resume(env)
-        finally:
-            writer.dedent()
 
     def _resume(self, env):
+        self._execute_statements(env)
+        writer.debugln(f"({self.name}:block) completed")
+
+        self.exit(env)
+
+    def _execute_statements(self, env):
         if self.env is not None:
+            # ensure outer environments are reachable
             self.env.enclosing = env
             env = self.env
 
         if self.index < len(self.stmts):
-            writer.debugln(f"executing ({self.name}:block) in env ({env.vars_repr()})")
+            writer.debugln(f"executing ({self.name}:block) in env ({repr(env)})")
 
         while self.index < len(self.stmts):
             stmt = self.stmts[self.index]
+
             writer.debugln(f"[{self.index}]({stmt.name}): ")
-            try:
-                writer.indent()
+            with indented_output(writer):
                 try_run_resumable(
                     stmt, env, parent=self, next_parent_index=self.index + 1
                 )
-            finally:
-                writer.dedent()
-
-        writer.debugln(f"({self.name}:block) completed")
-        raise StopIteration
 
     def reset(self, first_time=False):
         super().reset(first_time)
-
-        if first_time:
-            writer.debugln(f"setting up {self.name} block")
-        else:
-            writer.debugln(f"resetting {self.name} block")
 
         self.env = None
         if self.own_environment:
@@ -299,6 +354,11 @@ class ResumableWhile(Resumable):
             None: self.exit,
         }
 
+    def clone(self):
+        return ResumableWhile(
+            condition=self.condition, body=self.body.clone(), name=self.name
+        )
+
     def resume(self, env):
         while True:
             self.instructions[self.index](env)
@@ -306,11 +366,8 @@ class ResumableWhile(Resumable):
     def _execute_condition(self, env):
         writer.debugln(f"evaluating condition ({self.name})...")
         if self.condition.eval(env):
-            try:
-                writer.indent()
+            with indented_output(writer):
                 self._execute_body(env)
-            finally:
-                writer.dedent()
         else:
             self.exit(env)
 
@@ -344,6 +401,12 @@ class ResumableIf(Resumable):
             None: self.exit,
         }
         self.reset(first_time=True)
+
+    def clone(self):
+        else_ = else_.clone() if else_ else None
+        return ResumableIf(
+            condition=condition, then=then.clone(), else_=else_, name=self.name
+        )
 
     def resume(self, env):
         self.instructions[self.index](env)
@@ -382,11 +445,15 @@ class Print(Resumable):
         super().__init__(name="print")
         self.expr = expr
 
+    def clone(self):
+        # we can return the same object since it has no mutable state
+        return self
+
     def resume(self, env):
         writer.println(f"printing {self.expr.eval(env)}")
 
 
-class Var:
+class Var(Expr):
     def __init__(self, name):
         self.name = name
 
@@ -396,8 +463,11 @@ class Var:
     def __str__(self):
         return self.name
 
+    def __repr__(self):
+        return str(self)
 
-class Literal:
+
+class Literal(Expr):
     def __init__(self, value):
         self.value = value
 
@@ -405,12 +475,13 @@ class Literal:
         return self.value
 
     def __str__(self):
-        if isinstance(self.value, str):
-            return f"'{self.value}'"
         return str(self.value)
 
+    def __repr__(self):
+        return repr_string(self.value)
 
-class Binary:
+
+class Binary(Expr):
     def __init__(self, left, right, op):
         self.left = left
         self.right = right
@@ -421,7 +492,7 @@ class Binary:
         right_value = self.right.eval(env)
 
         writer.debugln(
-            f"[({self.left}={left_value}) {op_names[self.op]} ({self.right}={right_value})"
+            f"[({self.left}) {op_names[self.op]} ({self.right})"
             + f" => {self.op(left_value, right_value)}]"
         )
 
@@ -457,6 +528,10 @@ class Assign(Resumable):
         self.var = var
         self.expr = expr
 
+    def clone(self):
+        # we can return the same object since it has no mutable state
+        return self
+
     def resume(self, env):
         env[self.var.name] = self.expr.eval(env)
         writer.println(f"assigning {self.var.name} = {env[self.var.name]}")
@@ -468,131 +543,50 @@ class Define(Resumable):
         self.var_name = var_name
         self.initializer = initializer
 
+    def clone(self):
+        # we can return the same object since it has no mutable state
+        return self
+
     def resume(self, env):
         env.define(self.var_name, self.initializer.eval(env))
 
 
-def iterate(resumable, env):
+def iterate(resumable, args, env):
     try:
+        resumable = resumable.new(args)
         while True:
             value = resumable.resume(env)
-            if isinstance(value, str):
-                writer.println(f" --> ['{value}']")
-            else:
-                writer.println(f" --> [{value}]")
+            writer.println(" --> [{}]".format(repr_string(value)))
     except StopIteration:
         pass
 
 
 writer.println("-" * 80)
-writer.println("generator with conditionals and nested blocks")
-writer.println("-" * 80)
-
-env = Env.new({"fib": "<fn ...>"}, name="global")
-#
-# for (item : fib(0)) {
-#    println(item)
-# }
-#
-# fun fib(n) {
-#    var i = 0
-#    println(globals)
-#    if (n == 0) {
-#       yield "> n == 0"
-#       println(n)
-#       yield "> printed n"
-#       if (i == 1) {
-#          yield ">> i == 1"
-#          println(">> two levels deep")
-#          yield ">> after printing"
-#       } else
-#          yield ">> i != 1"
-#    }
-#    yield i + n
-# }
-#
-fib = ResumableFunction(
-    params=[Var("n")],
-    body=ResumableBlock(
-        [
-            Define("i", Literal(0)),
-            Print(Var("fib")),
-            ResumableIf(
-                Equals(Var("n"), Literal(0)),
-                ResumableBlock(
-                    [
-                        Yield(Literal("> n == 0")),
-                        Print(Var("n")),
-                        Yield(Literal("> printed n")),
-                        ResumableIf(
-                            Equals(Var("i"), Literal(1)),
-                            ResumableBlock(
-                                [
-                                    Yield(Literal(">> i == 1")),
-                                    Print(Literal(">> two levels deep")),
-                                    Yield(Literal(">> after printing")),
-                                ]
-                            ),
-                            else_=Yield(Literal(">> i != 1")),
-                        ),
-                    ],
-                    name="then",
-                ),
-            ),
-            Yield(Sum(Var("i"), Var("n"))),
-        ],
-        name="function",
-        own_environment=False,
-    ),
-    args={"n": 0},
-    name="fib",
-)
-iterate(fib, env)
-
-writer.println("-" * 80)
-writer.println("generator with while")
+writer.println("range_ generator")
 writer.println("-" * 80)
 
 env = Env.new(name="global")
-# for (item : upto(5)) {
+# for (item : range_(5)) {
 #    println(item)
 # }
 #
-# fun upto(n) {
-#    var i = 0
-#    while(i <= n) {
-#       var j = i + 1
-#       yield j
-#       if (i % 2 == 0) {
-#          var z = 0
-#          println("i was even")
-#          yield i + j
-#       }
+# fun range(start, end) {
+#    var i = start
+#    while(i <= end) {
+#       yield i
 #       i = i + 1
 #    }
 # }
-upto = ResumableFunction(
-    params=[Var("n")],
+range_ = ResumableFunction(
+    params=[Var("start"), Var("end")],
     body=ResumableBlock(
         [
-            Define("i", Literal(0)),
+            Define("i", Var("start")),
             ResumableWhile(
-                LessEquals(Var("i"), Var("n")),
+                LessEquals(Var("i"), Var("end")),
                 body=ResumableBlock(
                     [
-                        Define("j", Sum(Var("i"), Literal(1))),
-                        Yield(Var("j")),
-                        ResumableIf(
-                            Equals(Mod(Var("i"), Literal(2)), Literal(0)),
-                            ResumableBlock(
-                                [
-                                    Define("z", Literal(0)),
-                                    Print(Literal("i was even")),
-                                    Yield(Sum(Var("i"), Var("j"))),
-                                ],
-                                name="then",
-                            ),
-                        ),
+                        Yield(Var("i")),
                         Assign(Var("i"), Sum(Var("i"), Literal(1))),
                     ],
                     name="while",
@@ -602,7 +596,28 @@ upto = ResumableFunction(
         own_environment=False,
         name="function",
     ),
-    args={"n": 5},
-    name="upto",
+    name="range_",
 )
-iterate(upto, env)
+writer.println("iterate(range_(0, 5))")
+iterate(range_, {"start": 0, "end": 5}, env)
+writer.println("-" * 80)
+
+writer.println("iterate(range_(5, 10))")
+iterate(range_, {"start": 5, "end": 10}, env)
+writer.println("-" * 80)
+
+it1 = range_.new({"start": 5, "end": 10})
+it2 = range_.new({"start": 0, "end": 10})
+writer.println(it1.resume(env))
+writer.println(it2.resume(env))
+writer.println("-" * 80)
+
+writer.println(it1.resume(env))
+writer.println(it2.resume(env))
+writer.println("-" * 80)
+
+try:
+    it3 = range_.new({})
+    assert False, "range_.new({}) should have thrown an exception"
+except ValueError:
+    pass
