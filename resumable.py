@@ -30,13 +30,18 @@ class IndentingWriter:
             self.debug(message)
             print()
 
-    def print(self, message):
+    def print(self, message, with_title_box=False):
+        if with_title_box:
+            self.print_division_line()
+
         self._print_indentation()
         print(message, end="")
 
-    def println(self, message):
-        self.print(message)
-        print()
+        if with_title_box:
+            self.print_division_line()
+
+    def println(self, message, with_title_box=False):
+        self.print(message + "\n", with_title_box)
 
     def indent(self):
         if DEBUG:
@@ -45,6 +50,16 @@ class IndentingWriter:
     def dedent(self):
         if DEBUG:
             self._indents -= 1
+
+    def newline(self, on_debug_only=False):
+        if on_debug_only:
+            if DEBUG:
+                print()
+        else:
+            print()
+
+    def print_division_line(self, size=80):
+        print("-" * size)
 
     def _print_indentation(self):
         if DEBUG:
@@ -69,15 +84,24 @@ def indented_output(writer):
         writer.dedent()
 
 
+@contextmanager
+def surrounding_box_title(writer):
+    writer.print_division_line()
+    try:
+        yield
+    finally:
+        writer.print_division_line()
+
+
 class Env:
     def __init__(self, args=None, enclosing=None, name=""):
         self.enclosing = enclosing
         self.name = name
         self.key_values = dict()
 
-        if args:
+        if args is not None:
             for key, value in args.items():
-                env.define(key, value)
+                self.define(key, value)
 
     def __getitem__(self, key):
         if key in self.key_values:
@@ -390,7 +414,7 @@ class ResumableWhile(Resumable):
             env,
             parent=self,
             next_parent_index=0,
-            on_stop_iteration=self.body.reset,
+            on_stop_iteration=self.reset,
         )
 
 
@@ -546,7 +570,7 @@ class Assign(Resumable):
 
     def resume(self, env):
         env[self.var.name] = self.expr.eval(env)
-        writer.println(f"assigning {self.var.name} = {env[self.var.name]}")
+        writer.debugln(f"assigning {self.var.name} = {env[self.var.name]}")
 
 
 class Define(Resumable):
@@ -563,24 +587,19 @@ class Define(Resumable):
         env.define(self.var_name, self.initializer.eval(env))
 
 
-def iterate(resumable, args, env):
+def iterate(resumable, env):
     try:
-        resumable = resumable.new(args)
+        writer.newline()
         while True:
             value = resumable.resume(env)
             writer.println(" --> [{}]".format(repr_string(value)))
+            writer.newline()
     except StopIteration:
         pass
 
 
-writer.println("-" * 80)
-writer.println("range_ generator")
-writer.println("-" * 80)
+writer.println("RANGE_ GENERATOR", with_title_box=True)
 
-env = Env(name="global")
-# for (item : range_(5)) {
-#    println(item)
-# }
 #
 # fun range(start, end) {
 #    var i = start
@@ -610,26 +629,84 @@ range_ = ResumableFunction(
     ),
     name="range_",
 )
-writer.println("iterate(range_(0, 5))")
-iterate(range_, {"start": 0, "end": 5}, env)
-writer.println("-" * 80)
 
-writer.println("iterate(range_(5, 10))")
-iterate(range_, {"start": 5, "end": 10}, env)
-writer.println("-" * 80)
+globals = Env(name="global")
+with surrounding_box_title(writer):
+    writer.println("iterate(range_(0, 5))")
+    writer.newline(on_debug_only=True)
 
-it1 = range_.new({"start": 5, "end": 10})
-it2 = range_.new({"start": 0, "end": 10})
-writer.println(it1.resume(env))
-writer.println(it2.resume(env))
-writer.println("-" * 80)
+    iterate(range_.new({"start": 0, "end": 5}), globals)
 
-writer.println(it1.resume(env))
-writer.println(it2.resume(env))
-writer.println("-" * 80)
+with surrounding_box_title(writer):
+    writer.println("iterate(range_(5, 10))")
+    writer.newline(on_debug_only=True)
+
+    iterate(range_.new({"start": 5, "end": 10}), globals)
+
+# interleaved execution shows that the generators have indeed independent state
+with surrounding_box_title(writer):
+    writer.println("instantiating generators...")
+    writer.newline()
+
+    r1 = range_.new({"start": 5, "end": 10})
+    writer.newline(on_debug_only=True)
+
+    r2 = range_.new({"start": 0, "end": 10})
+    writer.newline(on_debug_only=True)
+
+    writer.println("\tnext(r1) --> {}".format(r1.resume(globals)))
+    writer.println("\tnext(r2) --> {}".format(r2.resume(globals)))
+    writer.newline()
+
+    writer.println("\tnext(r1) --> {}".format(r1.resume(globals)))
+    writer.println("\tnext(r2) --> {}".format(r2.resume(globals)))
+    writer.newline()
 
 try:
-    it3 = range_.new({})
+    range3 = range_.new({})
     assert False, "range_.new({}) should have thrown an exception"
 except ValueError:
     pass
+
+#
+# fun fib(n) {
+#    var previous_a = 0
+#    var a = 0
+#    var b = 1
+#    while(a <= n) {
+#       yield a
+#       previous_a = a
+#       a = b
+#       b = previous_a + b
+#    }
+# }
+fib = ResumableFunction(
+    params=[Var("n")],
+    body=ResumableBlock(
+        [
+            Define("previous_a", Literal(0)),
+            Define("a", Literal(0)),
+            Define("b", Literal(1)),
+            ResumableWhile(
+                LessEquals(Var("a"), Var("n")),
+                body=ResumableBlock(
+                    [
+                        Yield(Var("a")),
+                        Assign(Var("previous_a"), Var("a")),
+                        Assign(Var("a"), Var("b")),
+                        Assign(Var("b"), Sum(Var("previous_a"), Var("b"))),
+                    ],
+                    name="while",
+                ),
+            ),
+        ],
+        own_environment=False,
+        name="function",
+    ),
+    name="range_",
+)
+with surrounding_box_title(writer):
+    writer.println("iterate(fib(10), env)")
+    writer.newline(on_debug_only=True)
+
+    iterate(fib.new({"n": 10}), globals)
