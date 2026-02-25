@@ -1,0 +1,27 @@
+[project]
+name = "resumable"
+version = "0.1.0"
+description = "Toy resumable/generator runtime"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+
+[tool.pyright]
+typeCheckingMode = "strict"
+pythonVersion = "3.11"
+include = ["resumable.py", "ast_expressions.py", "ast_programs.py", "demo.py", "tests"]
+venvPath = "."
+venv = ".venv"
+
+[dependency-groups]
+dev = [
+    "pyright>=1.1.408",
+    "pytest>=9.0.2",
+    "ruff>=0.15.2",
+]
