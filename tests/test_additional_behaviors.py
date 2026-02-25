@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
+from pathlib import Path
 
 from ast_programs import build_range_function
 from resumable import Env, ResumableBlock, collect_values, try_run_resumable

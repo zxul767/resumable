@@ -15,7 +15,7 @@ target-version = "py311"
 [tool.pyright]
 typeCheckingMode = "strict"
 pythonVersion = "3.11"
-include = ["resumable.py", "ast_expressions.py", "ast_programs.py", "demo.py", "tests"]
+include = ["src/resumable.py", "src/ast_expressions.py", "src/ast_programs.py", "src/demo.py", "tests"]
 venvPath = "."
 venv = ".venv"
 
