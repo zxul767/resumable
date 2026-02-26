@@ -1,12 +1,6 @@
-from __future__ import annotations
-
-import os
-import subprocess
-import sys
-from pathlib import Path
-
-from ast_programs import build_range_function
-from resumable import Env, ResumableBlock, collect_values, try_run_resumable
+from resumable.ast_programs import build_range_function
+from resumable.runtime import RuntimeContext
+from resumable.resumable import Env, ResumableBlock, collect_values, try_run_resumable
 
 
 def test_try_run_resumable_respects_next_parent_index_zero() -> None:
@@ -14,7 +8,13 @@ def test_try_run_resumable_respects_next_parent_index_zero() -> None:
     child = ResumableBlock([], name="child")
     parent.index = 99
 
-    try_run_resumable(child, Env(name="global"), parent=parent, next_parent_index=0)
+    try_run_resumable(
+        child,
+        Env(name="global"),
+        RuntimeContext(),
+        parent=parent,
+        next_parent_index=0,
+    )
 
     assert parent.index == 0
 
@@ -28,6 +28,7 @@ def test_range_semantics_across_small_grid() -> None:
             values = collect_values(
                 range_fn.new({"start": start, "end": end}),
                 globals_env,
+                RuntimeContext(),
             )
             if start == end:
                 assert values == ["empty"]

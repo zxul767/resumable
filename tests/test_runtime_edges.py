@@ -1,10 +1,9 @@
-from __future__ import annotations
-
 import pytest
 
-from ast_expressions import Less, Literal, Sum, Var
-from ast_programs import build_range_function
-from resumable import (
+from resumable.runtime import RuntimeContext
+from resumable.ast_expressions import Less, Literal, Sum, Var
+from resumable.ast_programs import build_range_function
+from resumable.resumable import (
     Assign,
     Define,
     Env,
@@ -30,13 +29,23 @@ def test_extra_arguments_are_rejected() -> None:
         range_fn.new({"start": 0, "end": 2, "unused": 123})
 
 
+def test_duplicate_parameter_names_are_rejected() -> None:
+    fn = ResumableFunction(
+        params=[Var("x"), Var("x")],
+        body=ResumableBlock([Yield(Var("x"))], own_environment=False, name="function"),
+        name="dup_param_fn",
+    )
+    with pytest.raises(ValueError):
+        fn.new({"x": 1})
+
+
 def test_resume_after_done_raises_invalid_operation() -> None:
     globals_env = Env(name="global")
     range_gen = build_range_function().new({"start": 0, "end": 1})
-    assert collect_values(range_gen, globals_env) == [0]
+    assert collect_values(range_gen, globals_env, RuntimeContext()) == [0]
 
     with pytest.raises(InvalidOperation):
-        range_gen.resume(globals_env)
+        range_gen.resume(globals_env, RuntimeContext())
 
 
 def test_if_else_executes_both_branches() -> None:
@@ -61,8 +70,8 @@ def test_if_else_executes_both_branches() -> None:
     )
     globals_env = Env(name="global")
 
-    assert collect_values(chooser.new({"flag": True}), globals_env) == ["then"]
-    assert collect_values(chooser.new({"flag": False}), globals_env) == ["else"]
+    assert collect_values(chooser.new({"flag": True}), globals_env, RuntimeContext()) == ["then"]
+    assert collect_values(chooser.new({"flag": False}), globals_env, RuntimeContext()) == ["else"]
 
 
 def test_while_can_execute_zero_iterations() -> None:
@@ -85,7 +94,7 @@ def test_while_can_execute_zero_iterations() -> None:
         ),
         name="only_done_fn",
     )
-    values = collect_values(fn.new({"n": 0}), Env(name="global"))
+    values = collect_values(fn.new({"n": 0}), Env(name="global"), RuntimeContext())
     assert values == ["done"]
 
 
@@ -122,7 +131,7 @@ def test_inner_scope_shadowing_does_not_mutate_outer_binding() -> None:
         ),
         name="scope_isolation_fn",
     )
-    values = collect_values(fn.new({}), Env(name="global"))
+    values = collect_values(fn.new({}), Env(name="global"), RuntimeContext())
     assert values == [2, 3]
 
 
@@ -151,7 +160,7 @@ def test_assignment_in_inner_scope_updates_parent_binding_when_not_shadowed() ->
         ),
         name="parent_assignment_fn",
     )
-    values = collect_values(fn.new({}), Env(name="global"))
+    values = collect_values(fn.new({}), Env(name="global"), RuntimeContext())
     assert values == [2]
 
 
@@ -163,10 +172,10 @@ def test_three_generators_keep_independent_state() -> None:
     b = range_fn.new({"start": 10, "end": 12}, name="b")
     c = range_fn.new({"start": 100, "end": 102}, name="c")
 
-    assert a.resume(globals_env) == 0
-    assert b.resume(globals_env) == 10
-    assert c.resume(globals_env) == 100
-    assert a.resume(globals_env) == 1
-    assert b.resume(globals_env) == 11
-    assert c.resume(globals_env) == 101
-    assert a.resume(globals_env) == 2
+    assert a.resume(globals_env, RuntimeContext()) == 0
+    assert b.resume(globals_env, RuntimeContext()) == 10
+    assert c.resume(globals_env, RuntimeContext()) == 100
+    assert a.resume(globals_env, RuntimeContext()) == 1
+    assert b.resume(globals_env, RuntimeContext()) == 11
+    assert c.resume(globals_env, RuntimeContext()) == 101
+    assert a.resume(globals_env, RuntimeContext()) == 2

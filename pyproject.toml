@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "resumable"
 version = "0.1.0"
@@ -15,9 +19,15 @@ target-version = "py311"
 [tool.pyright]
 typeCheckingMode = "strict"
 pythonVersion = "3.11"
-include = ["src/resumable.py", "src/ast_expressions.py", "src/ast_programs.py", "src/demo.py", "tests"]
+include = ["src/resumable", "tests"]
 venvPath = "."
 venv = ".venv"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
 
 [dependency-groups]
 dev = [

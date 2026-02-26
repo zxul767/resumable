@@ -1,4 +1,4 @@
-.PHONY: install test lint format typecheck check clean
+.PHONY: install demo test lint format typecheck check clean
 
 UV_CACHE_DIR ?= /tmp/uv-cache
 UV = UV_CACHE_DIR=$(UV_CACHE_DIR) uv
@@ -6,13 +6,13 @@ UV = UV_CACHE_DIR=$(UV_CACHE_DIR) uv
 install:
 	$(UV) sync --dev
 
+demo:
+	$(UV) run python -m resumable.demo
+
 test:
 	$(UV) run pytest
 
 lint:
-	$(UV) run ruff check .
-
-fix:
 	$(UV) run ruff check --fix .
 
 format:

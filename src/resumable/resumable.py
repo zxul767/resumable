@@ -3,74 +3,17 @@ from __future__ import annotations
 import abc
 from typing import Any, Callable, Mapping, Self, Sequence
 
-from ast_expressions import Expr, Var, repr_string
-from writer import IndentingWriter, indented_output
+from .ast_expressions import Expr, Var, repr_string
+from .runtime import Env, RuntimeContext
+from .writer import indented_output
 
 
 Value = Any
-writer = IndentingWriter()
-
-
-class Env:
-    def __init__(
-        self,
-        args: Mapping[str, Value] | None = None,
-        enclosing: Env | None = None,
-        name: str = "",
-    ) -> None:
-        self.enclosing = enclosing
-        self._name = name
-        self._key_values: dict[str, Value] = {}
-
-        if args is not None:
-            for key, value in args.items():
-                self.define(key, value)
-
-    def __getitem__(self, key: str) -> Value:
-        if key in self._key_values:
-            return self._key_values[key]
-
-        if self.enclosing:
-            return self.enclosing[key]
-
-        raise KeyError(key)
-
-    def define(self, key: str, value: Value) -> None:
-        writer.debugln(f"defining {key}={value} on env:{self._name}")
-        self._key_values[key] = value
-
-    def __setitem__(self, key: str, value: Value) -> None:
-        if key in self._key_values:
-            self._key_values[key] = value
-        elif self.enclosing:
-            self.enclosing[key] = value
-        else:
-            raise KeyError(key)
-
-    def all_vars(self) -> dict[str, Any]:
-        result: dict[str, Any] = {
-            "name": self._name,
-            "self": list(self._key_values.items()),
-            "parent_env": None,
-        }
-        if self.enclosing is not None:
-            result["parent_env"] = {**self.enclosing.all_vars()}
-        return result
-
-    def __repr__(self) -> str:
-        chain = self.all_vars()
-        result = ""
-        while chain:
-            result += f"{chain['self']}:{chain['name']}"
-            chain = chain["parent_env"]
-            if chain:
-                result += " -> "
-        return result
-
 
 def try_run_resumable(
     resumable: Resumable,
     env: Env,
+    context: RuntimeContext,
     parent: Resumable,
     next_parent_index: int | None = None,
     on_resumable_done: Callable[[], None] | None = None,
@@ -87,7 +30,7 @@ def try_run_resumable(
             parent.index = parent.index + 1
 
     try:
-        resumable.resume(env)
+        resumable.resume(env, context)
         update_parent_index()
 
     except YieldValue as _yield:
@@ -98,7 +41,7 @@ def try_run_resumable(
     except ResumableDone:
         update_parent_index()
         if on_resumable_done:
-            writer.debugln("invoking on_resumable_done()")
+            context.writer.debugln("invoking on_resumable_done()")
             on_resumable_done()
 
 
@@ -117,23 +60,16 @@ class Resumable(abc.ABC):
         raise NotImplementedError
 
     @abc.abstractmethod
-    def resume(self, env: Env) -> Value | None:
+    def resume(self, env: Env, context: RuntimeContext) -> Value | None:
         raise NotImplementedError
 
-    def _mark_as_done(self, env: Env) -> None:
-        del env
+    def _mark_as_done(self, _env: Env) -> None:
         self.index = None
         raise ResumableDone
 
     def reset(self, first_time: bool = False) -> None:
-        writer.debugln(
-            "{0} {1} block".format(
-                "setting up" if first_time else "resetting", self.name
-            )
-        )
         self.index = 0
         if not first_time:
-            writer.debugln(f"resetting children of {self.name}")
             self._reset_children()
 
     def _reset_children(self) -> None:
@@ -156,7 +92,6 @@ class NonStatefulResumable(Resumable):
         super().__init__(*args, **kwargs)
 
     def clone(self, name: str = "") -> Self:
-        del name
         return self
 
 
@@ -165,9 +100,9 @@ class Yield(NonStatefulResumable):
         super().__init__(name="yield")
         self._expr = expr
 
-    def resume(self, env: Env) -> None:
-        value = self._expr.eval(env)
-        writer.debug(repr_string(value))
+    def resume(self, env: Env, context: RuntimeContext) -> None:
+        value = self._expr.eval(env, context)
+        context.writer.debug(repr_string(value))
         raise YieldValue(value, sender=self)
 
 
@@ -183,7 +118,6 @@ class ResumableFunction(Resumable):
         self._params = params
         self._body = body
         self._env: Env | None = None
-        writer.debugln(f"setting up resumable function: {name}")
 
     def clone(self, name: str = "") -> ResumableFunction:
         return ResumableFunction(
@@ -192,7 +126,7 @@ class ResumableFunction(Resumable):
             name=name or self.name,
         )
 
-    def resume(self, env: Env) -> Value:
+    def resume(self, env: Env, context: RuntimeContext) -> Value:
         self._raise_if_done()
 
         if self._env is None:
@@ -200,8 +134,8 @@ class ResumableFunction(Resumable):
 
         try:
             self._env.enclosing = env
-            writer.debugln("resuming function...")
-            self._body.resume(self._env)
+            context.writer.debugln("resuming function...")
+            self._body.resume(self._env, context)
 
         except YieldValue as _yield:
             return _yield.value
@@ -214,21 +148,31 @@ class ResumableFunction(Resumable):
         )
 
     def reset(self, first_time: bool = False) -> None:
-        del first_time
-        raise ValueError("`ResumableFunction`s cannot be reset by design!")
+        raise ValueError(
+            f"`ResumableFunction`s cannot be reset by design! first_time={first_time}"
+        )
 
     def new(
         self, args: Mapping[str, Value] | None = None, name: str = ""
     ) -> ResumableFunction:
-        writer.debugln(f"creating new generator: {name}")
         self._validate_call_args(args)
-        _clone = self.clone(name=name)
-        _clone._env = Env(args, name=self.name)
-        return _clone
+        cloned_function = self.clone(name=name)
+        cloned_function._env = Env(args, name=self.name)
+        return cloned_function
 
     def _validate_call_args(self, args: Mapping[str, Value] | None) -> None:
         if not isinstance(args, Mapping):
             raise ValueError("Expected arguments as a dictionary-like mapping")
+
+        seen: set[str] = set()
+        duplicates: set[str] = set()
+        for param in self._params:
+            if param.name in seen:
+                duplicates.add(param.name)
+            seen.add(param.name)
+
+        if duplicates:
+            raise ValueError(f"Duplicate parameter names: {sorted(duplicates)}")
 
         param_names = {param.name for param in self._params}
         missing = param_names - set(args.keys())
@@ -259,29 +203,32 @@ class ResumableBlock(Resumable):
             own_environment=self._own_environment,
         )
 
-    def resume(self, env: Env) -> None:
+    def resume(self, env: Env, context: RuntimeContext) -> None:
         self._raise_if_done()
 
-        with indented_output(writer):
-            self._execute_statements(env)
-            writer.debugln(f"({self.name}:block) completed")
+        with indented_output(context.writer):
+            self._execute_statements(env, context)
+            context.writer.debugln(f"({self.name}:block) completed")
         self._mark_as_done(env)
 
-    def _execute_statements(self, env: Env) -> None:
+    def _execute_statements(self, env: Env, context: RuntimeContext) -> None:
         assert self.index is not None, "BlockResumable cannot execute when finished"
 
         env = self._maybe_chain_environment(env)
 
         if self.index < len(self.stmts):
-            writer.debugln(f"executing ({self.name}:block) in env ({repr(env)})")
+            context.writer.debugln(
+                f"executing ({self.name}:block) in env ({repr(env)})"
+            )
 
         while self.index < len(self.stmts):
             stmt = self.stmts[self.index]
-            writer.debugln(f"[{self.index}]({stmt.name}): ")
-            with indented_output(writer):
+            context.writer.debugln(f"[{self.index}]({stmt.name}): ")
+            with indented_output(context.writer):
                 try_run_resumable(
                     stmt,
                     env,
+                    context,
                     parent=self,
                     next_parent_index=self.index + 1,
                 )
@@ -306,10 +253,10 @@ class ResumableWhile(Resumable):
         super().__init__(name=name, children=[body])
         self.condition = condition
         self.body = body
-        self._instructions: dict[int | None, Callable[[Env], None]] = {
+        self._instructions: dict[int | None, Callable[[Env, RuntimeContext], None]] = {
             0: self._execute_condition,
             1: self._execute_body,
-            None: self._mark_as_done,
+            None: lambda env, _ctx: self._mark_as_done(env),
         }
         self.reset(first_time=True)
 
@@ -320,23 +267,24 @@ class ResumableWhile(Resumable):
             name=name or self.name,
         )
 
-    def resume(self, env: Env) -> None:
+    def resume(self, env: Env, context: RuntimeContext) -> None:
         while True:
-            self._instructions[self.index](env)
+            self._instructions[self.index](env, context)
 
-    def _execute_condition(self, env: Env) -> None:
-        writer.debugln(f"evaluating condition ({self.name})...")
-        if self.condition.eval(env):
-            with indented_output(writer):
-                self._execute_body(env)
+    def _execute_condition(self, env: Env, context: RuntimeContext) -> None:
+        context.writer.debugln(f"evaluating condition ({self.name})...")
+        if self.condition.eval(env, context):
+            with indented_output(context.writer):
+                self._execute_body(env, context)
         else:
             self._mark_as_done(env)
 
-    def _execute_body(self, env: Env) -> None:
+    def _execute_body(self, env: Env, context: RuntimeContext) -> None:
         self.index = 1
         try_run_resumable(
             self.body,
             env,
+            context,
             parent=self,
             next_parent_index=0,
             on_resumable_done=self.reset,
@@ -357,11 +305,11 @@ class ResumableIf(Resumable):
         self.condition = condition
         self.then = then
         self.else_ = else_
-        self._instructions: dict[int | None, Callable[[Env], None]] = {
+        self._instructions: dict[int | None, Callable[[Env, RuntimeContext], None]] = {
             0: self._execute_condition,
             1: self._execute_if_branch,
             2: self._execute_else_branch,
-            3: self._mark_as_done,
+            3: lambda env, _ctx: self._mark_as_done(env),
         }
         self._condition_value: Value | None = None
         self.reset(first_time=True)
@@ -374,32 +322,32 @@ class ResumableIf(Resumable):
             name=name or self.name,
         )
 
-    def resume(self, env: Env) -> None:
-        self._instructions[self.index](env)
+    def resume(self, env: Env, context: RuntimeContext) -> None:
+        self._instructions[self.index](env, context)
 
-    def _execute_condition(self, env: Env) -> None:
+    def _execute_condition(self, env: Env, context: RuntimeContext) -> None:
         if self._condition_value is None:
-            writer.debug(f"evaluating condition ({self.name}): ")
-            self._condition_value = self.condition.eval(env)
+            context.writer.debug(f"evaluating condition ({self.name}): ")
+            self._condition_value = self.condition.eval(env, context)
 
         if self._condition_value:
-            self._execute_if_branch(env)
+            self._execute_if_branch(env, context)
         elif self.else_:
-            self._execute_else_branch(env)
+            self._execute_else_branch(env, context)
 
         self._mark_as_done(env)
 
-    def _execute_if_branch(self, env: Env) -> None:
+    def _execute_if_branch(self, env: Env, context: RuntimeContext) -> None:
         self.index = 1
-        writer.debugln("then branch")
-        try_run_resumable(self.then, env, parent=self, next_parent_index=3)
+        context.writer.debugln("then branch")
+        try_run_resumable(self.then, env, context, parent=self, next_parent_index=3)
         self._mark_as_done(env)
 
-    def _execute_else_branch(self, env: Env) -> None:
+    def _execute_else_branch(self, env: Env, context: RuntimeContext) -> None:
         self.index = 2
-        writer.debugln("else branch")
+        context.writer.debugln("else branch")
         assert self.else_ is not None
-        try_run_resumable(self.else_, env, parent=self, next_parent_index=3)
+        try_run_resumable(self.else_, env, context, parent=self, next_parent_index=3)
         self._mark_as_done(env)
 
     def reset(self, first_time: bool = False) -> None:
@@ -412,8 +360,8 @@ class Print(NonStatefulResumable):
         super().__init__(name="print")
         self.expr = expr
 
-    def resume(self, env: Env) -> None:
-        writer.println(f"printing {self.expr.eval(env)}")
+    def resume(self, env: Env, context: RuntimeContext) -> None:
+        context.writer.println(f"printing {self.expr.eval(env, context)}")
 
 
 class InvalidOperation(Exception):
@@ -430,9 +378,9 @@ class Assign(NonStatefulResumable):
         self._var = var
         self._expr = expr
 
-    def resume(self, env: Env) -> None:
-        env[self._var.name] = self._expr.eval(env)
-        writer.debugln(f"assigning {self._var.name} = {env[self._var.name]}")
+    def resume(self, env: Env, context: RuntimeContext) -> None:
+        env[self._var.name] = self._expr.eval(env, context)
+        context.writer.debugln(f"assigning {self._var.name} = {env[self._var.name]}")
 
 
 class Define(NonStatefulResumable):
@@ -441,27 +389,37 @@ class Define(NonStatefulResumable):
         self._var_name = var_name
         self._initializer = initializer
 
-    def resume(self, env: Env) -> None:
-        env.define(self._var_name, self._initializer.eval(env))
+    def resume(self, env: Env, context: RuntimeContext) -> None:
+        value = self._initializer.eval(env, context)
+        context.writer.debugln(f"defining {self._var_name} = {value}")
+        env.define(self._var_name, value)
 
 
-def iterate(resumable: ResumableFunction, env: Env) -> list[Value]:
+def iterate(
+    resumable: ResumableFunction,
+    env: Env,
+    context: RuntimeContext,
+) -> list[Value]:
     values: list[Value] = []
     try:
-        writer.newline()
+        context.writer.newline()
         while True:
-            value = resumable.resume(env)
+            value = resumable.resume(env, context)
             values.append(value)
-            writer.println(f" --> [{repr_string(value)}]")
-            writer.newline()
+            context.writer.println(f" --> [{repr_string(value)}]")
+            context.writer.newline()
     except ResumableDone:
         return values
 
 
-def collect_values(resumable: ResumableFunction, env: Env) -> list[Value]:
+def collect_values(
+    resumable: ResumableFunction,
+    env: Env,
+    context: RuntimeContext,
+) -> list[Value]:
     values: list[Value] = []
     try:
         while True:
-            values.append(resumable.resume(env))
+            values.append(resumable.resume(env, context))
     except ResumableDone:
         return values

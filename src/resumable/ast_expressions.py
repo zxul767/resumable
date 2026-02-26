@@ -1,14 +1,11 @@
-from __future__ import annotations
-
 import abc
 import operator
-from typing import Any, Callable, Protocol
+from typing import Any, Callable
 
-from writer import IndentingWriter
+from .runtime import Env, RuntimeContext
 
 Value = Any
 BinaryOperator = Callable[[Value, Value], Value]
-writer = IndentingWriter()
 
 op_names: dict[BinaryOperator, str] = {
     operator.__add__: "+",
@@ -19,11 +16,6 @@ op_names: dict[BinaryOperator, str] = {
 }
 
 
-class _EnvLike(Protocol):
-    def __getitem__(self, key: str) -> Value:
-        ...
-
-
 def repr_string(value: Value) -> str:
     if isinstance(value, str):
         return f"'{value}'"
@@ -32,7 +24,7 @@ def repr_string(value: Value) -> str:
 
 class Expr(abc.ABC):
     @abc.abstractmethod
-    def eval(self, env: _EnvLike) -> Value:
+    def eval(self, env: Env, context: RuntimeContext) -> Value:
         raise NotImplementedError
 
 
@@ -40,7 +32,7 @@ class Var(Expr):
     def __init__(self, name: str) -> None:
         self.name = name
 
-    def eval(self, env: _EnvLike) -> Value:
+    def eval(self, env: Env, context: RuntimeContext) -> Value:
         return env[self.name]
 
     def __str__(self) -> str:
@@ -54,8 +46,7 @@ class Literal(Expr):
     def __init__(self, value: Value) -> None:
         self.value = value
 
-    def eval(self, env: _EnvLike) -> Value:
-        del env
+    def eval(self, env: Env, context: RuntimeContext) -> Value:
         return self.value
 
     def __str__(self) -> str:
@@ -71,11 +62,11 @@ class Binary(Expr):
         self.right = right
         self.op = op
 
-    def eval(self, env: _EnvLike) -> Value:
-        left_value = self.left.eval(env)
-        right_value = self.right.eval(env)
+    def eval(self, env: Env, context: RuntimeContext) -> Value:
+        left_value = self.left.eval(env, context)
+        right_value = self.right.eval(env, context)
 
-        writer.debugln(
+        context.writer.debugln(
             f"[({self.left}) {op_names[self.op]} ({self.right})"
             + f" => {self.op(left_value, right_value)}]"
         )

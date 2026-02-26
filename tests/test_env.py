@@ -1,6 +1,4 @@
-from __future__ import annotations
-
-from resumable import Env
+from resumable.runtime import Env
 
 
 def test_env_lookup_walks_parent_chain() -> None:

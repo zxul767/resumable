@@ -1,9 +1,6 @@
-from __future__ import annotations
-
 from contextlib import contextmanager
 from typing import Iterator
 
-# DEBUG = True
 DEBUG = False
 
 
@@ -22,18 +19,12 @@ class IndentingWriter:
             self.debug(message)
             print()
 
-    def print(self, message: str, with_title_box: bool = False) -> None:
-        if with_title_box:
-            self.print_division_line()
-
+    def print(self, message: str) -> None:
         self._print_indentation()
         print(message, end="")
 
-        if with_title_box:
-            self.print_division_line()
-
-    def println(self, message: str, with_title_box: bool = False) -> None:
-        self.print(message + "\n", with_title_box)
+    def println(self, message: str) -> None:
+        self.print(message + "\n")
 
     def indent(self) -> None:
         if DEBUG:
@@ -68,9 +59,12 @@ def indented_output(output_writer: IndentingWriter) -> Iterator[None]:
 
 
 @contextmanager
-def surrounding_box_title(output_writer: IndentingWriter) -> Iterator[None]:
+def surrounding_box_title(
+    output_writer: IndentingWriter, omit_lower_line: bool = False
+) -> Iterator[None]:
     output_writer.print_division_line()
     try:
         yield
     finally:
-        output_writer.print_division_line()
+        if not omit_lower_line:
+            output_writer.print_division_line()

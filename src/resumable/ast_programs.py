@@ -1,7 +1,5 @@
-from __future__ import annotations
-
-from ast_expressions import Equals, Less, LessEquals, Literal, Sum, Var
-from resumable import (
+from .ast_expressions import Equals, Less, LessEquals, Literal, Sum, Var
+from .resumable import (
     Assign,
     Define,
     ResumableBlock,
