@@ -22,6 +22,11 @@
 - PREFER short functions that conceptually do one thing.
 - AVOID mixing different levels of abstraction in a single function.
 
+## TESTS
+- AVOID repeated setup in tests. If the same setup appears in multiple tests, extract a small helper function.
+- KEEP helpers small and intention-revealing so each test remains readable at a glance.
+- DO NOT extract one-off setup into helpers; inline it when used only once.
+
 ### Function Design Constitution
 #### 1. Single Level of Abstraction
 Each function operates at one conceptual level only. Do not mix domain logic with IO, formatting, parsing, or other low-level details.
