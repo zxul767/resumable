@@ -3,6 +3,8 @@
 UV_CACHE_DIR ?= /tmp/uv-cache
 UV = UV_CACHE_DIR=$(UV_CACHE_DIR) uv
 
+check: lint typecheck test
+
 install:
 	$(UV) sync --dev
 
@@ -20,8 +22,6 @@ format:
 
 typecheck:
 	$(UV) run pyright
-
-check: lint typecheck test
 
 clean:
 	find . -type d -name __pycache__ -prune -exec rm -rf {} +

@@ -1,9 +1,25 @@
-from dataclasses import dataclass, field
-from typing import Any, Mapping
+from __future__ import annotations
 
-from .writer import IndentingWriter
+from dataclasses import dataclass, field
+from typing import Any, Mapping, Protocol
+
+from ..writer import IndentingWriter
 
 Value = Any
+
+
+@dataclass
+class ProgramState:
+    global_env: Env
+    context: RuntimeContext
+
+
+class CallableValue(Protocol):
+    def __call__(self, args: list[Value], context: RuntimeContext) -> Value | None: ...
+
+
+class InvalidOperation(Exception):
+    """The object is in a state that does not allow this operation."""
 
 
 @dataclass
@@ -15,10 +31,10 @@ class Env:
     def __init__(
         self,
         args: Mapping[str, Value] | None = None,
-        enclosing: "Env | None" = None,
+        parent_env: "Env | None" = None,
         name: str = "",
     ) -> None:
-        self.enclosing = enclosing
+        self.parent_env = parent_env
         self._name = name
         self._key_values: dict[str, Value] = {}
 
@@ -30,8 +46,8 @@ class Env:
         if key in self._key_values:
             return self._key_values[key]
 
-        if self.enclosing:
-            return self.enclosing[key]
+        if self.parent_env:
+            return self.parent_env[key]
 
         raise KeyError(key)
 
@@ -41,8 +57,8 @@ class Env:
     def __setitem__(self, key: str, value: Value) -> None:
         if key in self._key_values:
             self._key_values[key] = value
-        elif self.enclosing:
-            self.enclosing[key] = value
+        elif self.parent_env:
+            self.parent_env[key] = value
         else:
             raise KeyError(key)
 
@@ -52,8 +68,8 @@ class Env:
             "self": list(self._key_values.items()),
             "parent_env": None,
         }
-        if self.enclosing is not None:
-            result["parent_env"] = {**self.enclosing.all_vars()}
+        if self.parent_env is not None:
+            result["parent_env"] = {**self.parent_env.all_vars()}
         return result
 
     def __repr__(self) -> str:

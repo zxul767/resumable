@@ -8,6 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 ENV = os.environ.copy()
 
 
+# ===== Import Side Effects =====
 def test_import_resumable_has_no_stdout_side_effects() -> None:
     proc = subprocess.run(
         [sys.executable, "-c", "import resumable"],
@@ -21,9 +22,9 @@ def test_import_resumable_has_no_stdout_side_effects() -> None:
     assert proc.stdout == ""
 
 
-def test_import_ast_programs_has_no_stdout_side_effects() -> None:
+def test_import_demo_has_no_stdout_side_effects() -> None:
     proc = subprocess.run(
-        [sys.executable, "-c", "import resumable.ast_programs"],
+        [sys.executable, "-c", "import resumable.demo"],
         capture_output=True,
         text=True,
         cwd=ROOT,

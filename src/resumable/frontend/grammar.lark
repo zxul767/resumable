@@ -1,0 +1,76 @@
+start: program
+
+program: declaration*
+
+declaration: function_declaration
+           | statement
+
+function_declaration: "fun" IDENTIFIER "(" [parameters] ")" block   -> fun_declaration
+                    | "gen" IDENTIFIER "(" [parameters] ")" block   -> gen_declaration
+
+parameters: IDENTIFIER ("," IDENTIFIER)*
+
+statement: var_declaration ";"
+         | assignment_statement ";"
+         | expression_statement ";"
+         | return_statement ";"
+         | yield_statement ";"
+         | if_statement
+         | while_statement
+         | block
+
+var_declaration: "var" IDENTIFIER "=" expr                    -> var_declaration
+assignment_statement: IDENTIFIER "=" expr                     -> assign
+expression_statement: expr                                    -> expression_statement
+
+return_statement: "return" [expr]                             -> return_statement
+yield_statement: "yield" expr                                 -> yield_statement
+
+if_statement: "if" expr block ["else" block]                  -> if_statement
+while_statement: "while" expr block                           -> while_statement
+
+block: "{" declaration* "}"                                   -> block
+
+?expr: equality
+
+?equality: comparison
+         | equality "==" comparison                           -> eq
+
+?comparison: term
+           | comparison "<" term                              -> lt
+           | comparison "<=" term                             -> le
+
+?term: factor
+     | term "+" factor                                        -> add
+     | term "-" factor                                        -> sub
+
+?factor: unary
+       | factor "*" unary                                     -> mul
+       | factor "/" unary                                     -> div
+       | factor "mod" unary                                   -> mod
+
+?unary: "-" unary                                             -> neg
+      | primary
+
+?primary: literal
+        | IDENTIFIER "(" [arguments] ")"                      -> call
+        | IDENTIFIER                                          -> var
+        | "(" expr ")"
+
+arguments: expr ("," expr)*
+
+literal: NUMBER                                               -> number
+       | STRING                                               -> string
+       | "true"                                               -> true
+       | "false"                                              -> false
+       | "nil"                                                -> nil
+
+IDENTIFIER: /[a-zA-Z_][a-zA-Z0-9_]*[!?]?/
+
+%import common.INT -> NUMBER
+%import common.ESCAPED_STRING -> STRING
+%import common.WS
+%ignore WS
+
+COMMENT: /\/\/[^\n]*/
+%ignore COMMENT
