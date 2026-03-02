@@ -15,7 +15,7 @@ from ..frontend.ast_statements import (
     While,
     Yield as YieldStatement,
 )
-from .resumable import (
+from .generator import (
     ResumableAssignment,
     ResumableDefine,
     ResumableEvaluateExpression,

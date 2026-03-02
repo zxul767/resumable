@@ -19,7 +19,7 @@ Dependency rule:
 - `runtime/interpreter.py`: orchestration (`run`, `run_for_cli`).
 - `runtime/stdlib.py`: built-ins (`next`, `collect`).
 - `runtime/generator_compiler.py`: generator lowering bridge and `GeneratorValue`.
-- `runtime/resumable.py`: resumable execution model.
+- `runtime/generator.py`: resumable execution model.
 
 ## Frontend Modules
 - `frontend/grammar.lark`: grammar.

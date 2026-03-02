@@ -1,7 +1,7 @@
 from .runtime.core import RuntimeContext
 from .runtime.interpreter import run
 from .runtime.generator_compiler import instantiate_generator
-from .runtime.resumable import collect_values
+from .runtime.generator import collect_values
 from .snippets import range_generator_source
 from .writer import surrounding_box_title, IndentingWriter
 

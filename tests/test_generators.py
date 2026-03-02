@@ -9,7 +9,7 @@ from resumable.runtime.generator_compiler import (
     instantiate_generator,
 )
 from resumable.runtime.interpreter import run
-from resumable.runtime.resumable import (
+from resumable.runtime.generator import (
     Env,
     ResumableBlock,
     Generator,
