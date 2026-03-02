@@ -17,6 +17,5 @@ Repository-wide rules for contributors and coding agents.
 
 ## Change Rules
 - Keep changes small and focused.
-- Avoid unrelated refactors.
-- Preserve debug behavior unless explicitly requested otherwise.
+- Avoid unrelated refactors in feature, task,  etc., commits.
 - When behavior changes, update tests and docs in the same change.
