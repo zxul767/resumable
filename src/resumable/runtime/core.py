@@ -28,7 +28,7 @@ class RuntimeContext:
     writer: IndentingWriter = field(default_factory=IndentingWriter)
 
 
-def format_value(value: Value) -> str:
+def format_repl_value(value: Value) -> str:
     if value is None:
         return "nil"
     if value is True:
@@ -38,6 +38,12 @@ def format_value(value: Value) -> str:
     if isinstance(value, str):
         return json.dumps(value)
     return str(value)
+
+
+def format_output_value(value: Value) -> str:
+    if isinstance(value, str):
+        return value
+    return format_repl_value(value)
 
 
 def value_type_name(value: Value) -> str:

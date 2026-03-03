@@ -1,4 +1,4 @@
-from .core import Env, RuntimeContext, Value, format_value
+from .core import Env, RuntimeContext, Value, format_output_value
 from .generator_compiler import GeneratorValue
 from .generator import collect_values
 
@@ -26,27 +26,19 @@ class CollectBuiltin:
 class PrintBuiltin:
     def __call__(self, args: list[Value], _context: RuntimeContext) -> None:
         _require_zero_or_one_arg(args, "print")
-        if not args:
-            print("", end="")
-            return
-        value = args[0]
-        if isinstance(value, str):
-            print(value, end="")
-            return
-        print(format_value(value), end="")
+        if args:
+            value = args[0]
+            print(format_output_value(value), end="")
 
 
 class PrintlnBuiltin:
     def __call__(self, args: list[Value], _context: RuntimeContext) -> None:
         _require_zero_or_one_arg(args, "println")
-        if not args:
+        if args:
+            value = args[0]
+            print(format_output_value(value))
+        else:
             print("")
-            return
-        value = args[0]
-        if isinstance(value, str):
-            print(value)
-            return
-        print(format_value(value))
 
 
 def install_stdlib(env: Env) -> None:

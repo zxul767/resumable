@@ -7,7 +7,7 @@ from .core import (
     Env,
     RuntimeContext,
     Value,
-    format_value,
+    format_repl_value,
     value_type_name,
 )
 
@@ -46,7 +46,8 @@ def eval_expr(expr: Expression, env: Env, context: RuntimeContext) -> Value:
         value = eval_expr(expr.expr, env, context)
         if not _is_number(value):
             raise ValueError(
-                f"invalid operand for unary '-': {value_type_name(value)} ({format_value(value)})"
+                "invalid operand for unary '-': "
+                f"{value_type_name(value)} ({format_repl_value(value)})"
             )
         result = -value
         context.writer.debugln(f"[-({expr.expr}) => {result}]")
@@ -59,15 +60,15 @@ def eval_expr(expr: Expression, env: Env, context: RuntimeContext) -> Value:
             if not _is_number(left_value) or not _is_number(right_value):
                 raise ValueError(
                     "invalid operands for "
-                    f"'{expr.op}': {value_type_name(left_value)} ({format_value(left_value)}) "
-                    f"and {value_type_name(right_value)} ({format_value(right_value)})"
+                    f"'{expr.op}': {value_type_name(left_value)} ({format_repl_value(left_value)}) "
+                    f"and {value_type_name(right_value)} ({format_repl_value(right_value)})"
                 )
         try:
             result = _binary_ops[expr.op](left_value, right_value)
         except Exception as error:
             raise ValueError(
                 "runtime error while evaluating "
-                f"'{expr.op}' with {format_value(left_value)} and {format_value(right_value)}: "
+                f"'{expr.op}' with {format_repl_value(left_value)} and {format_repl_value(right_value)}: "
                 f"{error}"
             ) from error
         context.writer.debugln(

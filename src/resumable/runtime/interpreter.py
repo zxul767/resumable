@@ -6,7 +6,7 @@ from lark.exceptions import LarkError
 from ..frontend.ast_statements import Program
 from ..frontend.parser import parse_and_validate
 from ..frontend.semantic import SemanticError
-from .core import Env, ProgramState, RuntimeContext, format_value
+from .core import Env, ProgramState, RuntimeContext, format_repl_value
 from .statement_executor import execute_declaration
 from .stdlib import install_stdlib
 
@@ -28,7 +28,8 @@ def report_runtime_error(error: Exception, stderr: TextIO) -> None:
             print("Runtime error: generator is exhausted", file=stderr)
             return
         print(
-            f"Runtime error: generator is exhausted (final value: {format_value(error.value)})",
+            "Runtime error: generator is exhausted "
+            f"(final value: {format_repl_value(error.value)})",
             file=stderr,
         )
         return

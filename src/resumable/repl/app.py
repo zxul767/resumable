@@ -11,7 +11,7 @@ from prompt_toolkit.key_binding.key_processor import KeyPressEvent
 from ..frontend.ast_expressions import Call, Expression
 from ..frontend.ast_statements import ExpressionStatement, Declaration
 from ..frontend.parser import parse_tree
-from ..runtime.core import Env, RuntimeContext, format_value
+from ..runtime.core import Env, RuntimeContext, format_repl_value
 from ..runtime.expression_evaluator import eval_expr
 from ..runtime.interpreter import parse_source_for_cli, report_runtime_error
 from ..runtime.statement_executor import execute_declaration
@@ -58,7 +58,7 @@ def _try_eval_last_expression(
         # `nil` is mostly returned by functions used for side effects,
         # so there is no point in printing it
         if not (value is None and isinstance(expression, Call)):
-            print(format_value(value), file=stdout)
+            print(format_repl_value(value), file=stdout)
         return True
     return False
 
