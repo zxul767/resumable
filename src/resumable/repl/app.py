@@ -8,8 +8,8 @@ from prompt_toolkit.history import FileHistory
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.key_binding.key_processor import KeyPressEvent
 
-from ..frontend.ast_expressions import Call
-from ..frontend.ast_statements import ExpressionStatement
+from ..frontend.ast_expressions import Call, Expression
+from ..frontend.ast_statements import ExpressionStatement, Declaration
 from ..frontend.parser import parse_tree
 from ..runtime.core import Env, RuntimeContext, format_value
 from ..runtime.expression_evaluator import eval_expr
@@ -17,6 +17,8 @@ from ..runtime.interpreter import parse_source_for_cli, report_runtime_error
 from ..runtime.statement_executor import execute_declaration
 from ..runtime.stdlib import install_stdlib
 from .highlighting import LarkGrammarLexer, REPL_STYLE
+
+REPL_HELP = "Run/continue: Enter | New line: Ctrl-J | Quit: exit/quit/Ctrl-D"
 
 
 def run_in_repl(
@@ -34,12 +36,7 @@ def run_in_repl(
     try:
         declarations = program.declarations
         for index, declaration in enumerate(declarations):
-            is_last = index == len(declarations) - 1
-            if is_last and isinstance(declaration, ExpressionStatement):
-                expression = declaration.expression
-                value = eval_expr(expression, env, context)
-                if not (value is None and isinstance(expression, Call)):
-                    print(format_value(value), file=stdout)
+            if _try_eval_last_expression(index, declarations, env, context, stdout):
                 continue
             execute_declaration(declaration, env, context)
         return True
@@ -48,18 +45,50 @@ def run_in_repl(
         return False
 
 
-def is_complete_source(source: str) -> bool:
+def _try_eval_last_expression(
+    index: int,
+    declarations: list[Declaration],
+    env: Env,
+    context: RuntimeContext,
+    stdout: TextIO,
+) -> bool:
+    is_last = index == len(declarations) - 1
+    if is_last and (expression := _as_expression(declarations[index])):
+        value = eval_expr(expression, env, context)
+        # `nil` is mostly returned by functions used for side effects,
+        # so there is no point in printing it
+        if not (value is None and isinstance(expression, Call)):
+            print(format_value(value), file=stdout)
+        return True
+    return False
+
+
+def _as_expression(declaration: Declaration) -> Expression | None:
+    if isinstance(declaration, ExpressionStatement):
+        return declaration.expression
+    return None
+
+
+def is_source_complete(source: str) -> bool:
     try:
         parse_tree(source)
         return True
     except UnexpectedEOF:
+        # Parser reached end-of-input while still expecting more tokens
+        # (for example an open block or unfinished expression).
         return False
     except UnexpectedInput as error:
         token = getattr(error, "token", None)
+        # Lark sometimes reports "unexpected end of input" as UnexpectedInput
+        # with the synthetic $END token instead of raising UnexpectedEOF.
         if token is not None and getattr(token, "type", None) == "$END":
             return False
+        # Any other UnexpectedInput means input is complete but invalid.
+        # Enter should submit so the user sees a syntax error message.
         return True
     except Exception:
+        # For non-parser failures, avoid trapping the user in multiline mode.
+        # Submit and let the normal error-reporting path handle it.
         return True
 
 
@@ -67,7 +96,7 @@ def should_eval_source(source: str) -> bool:
     stripped = source.strip()
     if stripped in {"exit", "quit"}:
         return True
-    return is_complete_source(source)
+    return is_source_complete(source)
 
 
 def run_repl() -> None:
@@ -106,9 +135,7 @@ def run_repl() -> None:
         """
 
     print(banner)
-    print(
-        "Resumable REPL. Run/continue: Enter. New line: Ctrl-J. Quit: exit/quit/Ctrl-D."
-    )
+    print(f"Resumable REPL. {REPL_HELP}")
 
     while True:
         try:
@@ -119,7 +146,6 @@ def run_repl() -> None:
                 key_bindings=bindings,
                 lexer=LarkGrammarLexer(),
                 style=REPL_STYLE,
-                bottom_toolbar="Run/continue: Enter | New line: Ctrl-J | Quit: exit/quit/Ctrl-D",
             )
         except EOFError:
             print("bye")

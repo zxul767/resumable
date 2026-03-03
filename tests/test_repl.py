@@ -1,6 +1,6 @@
 from io import StringIO
 
-from resumable.repl.app import run_in_repl, is_complete_source, should_eval_source
+from resumable.repl.app import run_in_repl, is_source_complete, should_eval_source
 from resumable.runtime.core import Env, RuntimeContext
 from resumable.runtime.stdlib import install_stdlib
 from .helpers import (
@@ -73,8 +73,8 @@ def test_repl_reports_syntax_errors() -> None:
 
 
 def test_is_complete_source_detects_incomplete_input() -> None:
-    assert is_complete_source("fun f() {") is False
-    assert is_complete_source("fun f() { return 1; }") is True
+    assert is_source_complete("fun f() {") is False
+    assert is_source_complete("fun f() { return 1; }") is True
 
 
 def test_should_submit_source_accepts_quit_commands_without_semicolon() -> None:

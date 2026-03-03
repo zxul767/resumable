@@ -11,7 +11,7 @@ install:
 demo:
 	$(UV) run python -m resumable.demo
 
-repl:
+repl: lint
 	$(UV) run python -m resumable.repl
 
 test:
