@@ -19,10 +19,11 @@ from ..runtime.stdlib import install_stdlib
 from .highlighting import LarkGrammarLexer, REPL_STYLE
 
 
-def execute_repl_source(
+def run_in_repl(
     source: str,
     env: Env,
     context: RuntimeContext,
+    *,
     stdout: TextIO,
     stderr: TextIO,
 ) -> bool:
@@ -32,14 +33,14 @@ def execute_repl_source(
 
     try:
         declarations = program.declarations
-        if len(declarations) == 1 and isinstance(declarations[0], ExpressionStatement):
-            expression = declarations[0].expression
-            value = eval_expr(expression, env, context)
-            if not (value is None and isinstance(expression, Call)):
-                print(format_value(value), file=stdout)
-            return True
-
-        for declaration in declarations:
+        for index, declaration in enumerate(declarations):
+            is_last = index == len(declarations) - 1
+            if is_last and isinstance(declaration, ExpressionStatement):
+                expression = declaration.expression
+                value = eval_expr(expression, env, context)
+                if not (value is None and isinstance(expression, Call)):
+                    print(format_value(value), file=stdout)
+                continue
             execute_declaration(declaration, env, context)
         return True
     except Exception as error:
@@ -62,7 +63,7 @@ def is_complete_source(source: str) -> bool:
         return True
 
 
-def should_submit_source(source: str) -> bool:
+def should_eval_source(source: str) -> bool:
     stripped = source.strip()
     if stripped in {"exit", "quit"}:
         return True
@@ -78,7 +79,7 @@ def run_repl() -> None:
 
     def evaluate_if_complete(event: KeyPressEvent) -> None:
         buffer = event.current_buffer
-        if should_submit_source(buffer.text):
+        if should_eval_source(buffer.text):
             buffer.validate_and_handle()
         else:
             buffer.insert_text("\n")
@@ -131,4 +132,4 @@ def run_repl() -> None:
         if source.strip() in {"exit", "quit"}:
             print("bye")
             break
-        execute_repl_source(source, env, context, stdout=sys.stdout, stderr=sys.stderr)
+        run_in_repl(source, env, context, stdout=sys.stdout, stderr=sys.stderr)
