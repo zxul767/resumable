@@ -27,3 +27,22 @@ def test_interpret_source_reports_runtime_error_to_stderr() -> None:
 
     assert state is None
     assert_keywords_in_output(("runtime", "error"), stderr)
+    assert_keywords_in_output(("exhausted",), stderr)
+
+
+def test_interpret_source_reports_exhausted_generator_final_value() -> None:
+    source = """
+    gen one_then_return() {
+      yield 1;
+      return 99;
+    }
+
+    var g = one_then_return();
+    next(g);
+    next(g);
+    """
+    stderr = StringIO()
+    state = run_for_cli(source, stderr=stderr)
+
+    assert state is None
+    assert_keywords_in_output(("runtime", "error", "exhausted", "final value", "99"), stderr)
