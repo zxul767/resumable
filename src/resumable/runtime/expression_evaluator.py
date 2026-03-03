@@ -2,7 +2,14 @@ import operator
 from typing import Callable, cast
 
 from ..frontend.ast_expressions import Binary, BinaryOp, Call, Expression, Literal, Neg, Var
-from .core import CallableValue, Env, RuntimeContext, Value
+from .core import (
+    CallableValue,
+    Env,
+    RuntimeContext,
+    Value,
+    format_value,
+    value_type_name,
+)
 
 _binary_ops: dict[BinaryOp, Callable[[Value, Value], Value]] = {
     "+": operator.add,
@@ -14,6 +21,10 @@ _binary_ops: dict[BinaryOp, Callable[[Value, Value], Value]] = {
     "<": operator.lt,
     "mod": operator.mod,
 }
+
+
+def _is_number(value: Value) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
 def eval_expr(expr: Expression, env: Env, context: RuntimeContext) -> Value:
@@ -33,6 +44,10 @@ def eval_expr(expr: Expression, env: Env, context: RuntimeContext) -> Value:
 
     if isinstance(expr, Neg):
         value = eval_expr(expr.expr, env, context)
+        if not _is_number(value):
+            raise ValueError(
+                f"invalid operand for unary '-': {value_type_name(value)} ({format_value(value)})"
+            )
         result = -value
         context.writer.debugln(f"[-({expr.expr}) => {result}]")
         return result
@@ -40,7 +55,21 @@ def eval_expr(expr: Expression, env: Env, context: RuntimeContext) -> Value:
     if isinstance(expr, Binary):
         left_value = eval_expr(expr.left, env, context)
         right_value = eval_expr(expr.right, env, context)
-        result = _binary_ops[expr.op](left_value, right_value)
+        if expr.op in {"+", "-", "*", "/", "mod", "<", "<="}:
+            if not _is_number(left_value) or not _is_number(right_value):
+                raise ValueError(
+                    "invalid operands for "
+                    f"'{expr.op}': {value_type_name(left_value)} ({format_value(left_value)}) "
+                    f"and {value_type_name(right_value)} ({format_value(right_value)})"
+                )
+        try:
+            result = _binary_ops[expr.op](left_value, right_value)
+        except Exception as error:
+            raise ValueError(
+                "runtime error while evaluating "
+                f"'{expr.op}' with {format_value(left_value)} and {format_value(right_value)}: "
+                f"{error}"
+            ) from error
         context.writer.debugln(
             f"[({expr.left}) {expr.op} ({expr.right}) => {result}]"
         )

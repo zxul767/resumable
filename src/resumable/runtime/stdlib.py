@@ -1,4 +1,4 @@
-from .core import Env, RuntimeContext, Value
+from .core import Env, RuntimeContext, Value, format_value
 from .generator_compiler import GeneratorValue
 
 
@@ -22,11 +22,44 @@ class CollectBuiltin:
         return candidate.collect(context)
 
 
+class PrintBuiltin:
+    def __call__(self, args: list[Value], _context: RuntimeContext) -> None:
+        _require_zero_or_one_arg(args, "print")
+        if not args:
+            print("", end="")
+            return
+        value = args[0]
+        if isinstance(value, str):
+            print(value, end="")
+            return
+        print(format_value(value), end="")
+
+
+class PrintlnBuiltin:
+    def __call__(self, args: list[Value], _context: RuntimeContext) -> None:
+        _require_zero_or_one_arg(args, "println")
+        if not args:
+            print("")
+            return
+        value = args[0]
+        if isinstance(value, str):
+            print(value)
+            return
+        print(format_value(value))
+
+
 def install_stdlib(env: Env) -> None:
     env.define("next", NextBuiltin())
     env.define("collect", CollectBuiltin())
+    env.define("print", PrintBuiltin())
+    env.define("println", PrintlnBuiltin())
 
 
 def _require_one_arg(args: list[Value], function_name: str) -> None:
     if len(args) != 1:
         raise ValueError(f"{function_name} expects exactly one argument")
+
+
+def _require_zero_or_one_arg(args: list[Value], function_name: str) -> None:
+    if len(args) > 1:
+        raise ValueError(f"{function_name} expects at most one argument")

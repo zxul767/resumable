@@ -51,7 +51,7 @@ class AstTransformer(Transformer[Token, object]):
         return statement
 
     def parameters(self, children: list[object]) -> list[str]:
-        return [str(child) for child in children]
+        return [self._as_identifier(child) for child in children]
 
     def fun_declaration(self, children: list[object]) -> FunctionDeclaration:
         return self._function_declaration("fun", children)
@@ -72,10 +72,10 @@ class AstTransformer(Transformer[Token, object]):
             else:
                 assert isinstance(params_value, list)
                 params_items = cast(list[object], params_value)
-                params = [str(param) for param in params_items]
+                params = [self._as_identifier(param) for param in params_items]
         assert isinstance(name, Token)
         assert isinstance(body, Block)
-        return FunctionDeclaration(kind=kind, name=str(name), params=params, body=body)
+        return FunctionDeclaration(kind=kind, name=name, params=params, body=body)
 
     def block(self, children: list[object]) -> Block:
         declarations = [self._as_declaration(child) for child in children]
@@ -85,13 +85,13 @@ class AstTransformer(Transformer[Token, object]):
         [name, initializer] = children
         assert isinstance(name, Token)
         assert isinstance(initializer, Expression)
-        return VariableDeclaration(name=str(name), initializer=initializer)
+        return VariableDeclaration(name=name, initializer=initializer)
 
     def assign(self, children: list[object]) -> Assignment:
         [name, value] = children
         assert isinstance(name, Token)
         assert isinstance(value, Expression)
-        return Assignment(name=str(name), value=value)
+        return Assignment(name=name, value=value)
 
     def expression_statement(self, children: list[object]) -> ExpressionStatement:
         [expr] = children
@@ -180,22 +180,27 @@ class AstTransformer(Transformer[Token, object]):
                 args_items = cast(list[object], args_value)
                 args = [self._as_expression(arg) for arg in args_items]
         assert isinstance(name, Token)
-        return Call(callee_name=str(name), args=args)
+        return Call(callee_name=name, args=args)
 
     def var(self, children: list[object]) -> Var:
         [name] = children
         assert isinstance(name, Token)
-        return Var(str(name))
+        return Var(name)
 
     def number(self, children: list[object]) -> Literal:
         [number] = children
         assert isinstance(number, Token)
-        return Literal(int(str(number)))
+        return Literal(int(number))
+
+    def float(self, children: list[object]) -> Literal:
+        [number] = children
+        assert isinstance(number, Token)
+        return Literal(float(number))
 
     def string(self, children: list[object]) -> Literal:
         [value] = children
         assert isinstance(value, Token)
-        return Literal(ast.literal_eval(str(value)))
+        return Literal(ast.literal_eval(value))
 
     def true(self, children: list[object]) -> Literal:
         return Literal(True)
@@ -230,6 +235,10 @@ class AstTransformer(Transformer[Token, object]):
         if isinstance(value, FunctionDeclaration):
             return value
         return self._as_statement(value)
+
+    def _as_identifier(self, value: object) -> str:
+        assert isinstance(value, str)
+        return value
 
 
 def _load_grammar_text() -> str:

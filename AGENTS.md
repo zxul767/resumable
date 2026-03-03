@@ -10,6 +10,7 @@ Repository-wide rules for contributors and coding agents.
 ## Workflow
 - Install dependencies: `make install`
 - Test: `make test`
+- REPL: `make repl`
 - Lint: `make lint`
 - Format: `make format`
 - Type check: `make typecheck`

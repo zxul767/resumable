@@ -83,6 +83,16 @@ def test_parse_mod_keyword_operator() -> None:
     assert isinstance(return_statement, Return)
 
 
+def test_parse_float_literal() -> None:
+    program = parse_program("fun f() { return 10.32; }")
+    function_declaration = program.declarations[0]
+    assert isinstance(function_declaration, FunctionDeclaration)
+    return_statement = function_declaration.body.declarations[0]
+    assert isinstance(return_statement, Return)
+    assert isinstance(return_statement.value, Literal)
+    assert return_statement.value.value == 10.32
+
+
 # ===== If Syntax =====
 def test_if_without_parentheses_parses() -> None:
     program = parse_program(

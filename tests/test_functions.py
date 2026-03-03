@@ -153,3 +153,38 @@ def test_next_bubbles_stop_iteration_return_value() -> None:
     with pytest.raises(StopIteration) as stop:
         invoke(state, "second", [])
     assert stop.value.value == 99
+
+
+def test_print_and_println_write_user_output_to_stdout(capsys: pytest.CaptureFixture[str]) -> None:
+    state = run(
+        """
+        fun show() {
+          print("Hello");
+          println(" world");
+          println(true);
+          println(nil);
+        }
+        """
+    )
+
+    assert invoke(state, "show", []) is None
+    captured = capsys.readouterr()
+    assert captured.out == "Hello world\ntrue\nnil\n"
+    assert captured.err == ""
+
+
+def test_print_and_println_allow_zero_arguments(capsys: pytest.CaptureFixture[str]) -> None:
+    state = run(
+        """
+        fun show() {
+          print();
+          println();
+          println("ok");
+        }
+        """
+    )
+
+    assert invoke(state, "show", []) is None
+    captured = capsys.readouterr()
+    assert captured.out == "\nok\n"
+    assert captured.err == ""
