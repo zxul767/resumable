@@ -26,7 +26,6 @@ from .generator import (
     ResumableWhile,
     ResumableReturn,
     ResumableYield,
-    collect_values,
 )
 from .core import CallableValue, Env, RuntimeContext, Value
 
@@ -39,21 +38,18 @@ class GeneratorValue:
     def next_value(self, context: RuntimeContext) -> Value | None:
         return self.generator.resume(self.env, context)
 
-    def collect(self, context: RuntimeContext) -> list[Value]:
-        return collect_values(self.generator, self.env, context)
-
 
 def instantiate_generator_value(
     declaration: FunctionDeclaration,
     args: list[Value],
-    closure_env: Env,
+    parent_env: Env,
 ) -> GeneratorValue:
     arg_mapping = {
         name: value for name, value in zip(declaration.params, args, strict=True)
     }
     compiled = compile_generator_function(declaration)
     generator = compiled.new(arg_mapping)
-    return GeneratorValue(generator=generator, env=closure_env)
+    return GeneratorValue(generator=generator, env=parent_env)
 
 
 def instantiate_generator(

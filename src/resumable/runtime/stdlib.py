@@ -1,5 +1,6 @@
 from .core import Env, RuntimeContext, Value, format_value
 from .generator_compiler import GeneratorValue
+from .generator import collect_values
 
 
 class NextBuiltin:
@@ -16,10 +17,10 @@ class CollectBuiltin:
     def __call__(self, args: list[Value], context: RuntimeContext) -> list[Value]:
         _require_one_arg(args, "collect")
 
-        candidate = args[0]
-        if not isinstance(candidate, GeneratorValue):
+        value = args[0]
+        if not isinstance(value, GeneratorValue):
             raise ValueError("collect expects a generator instance")
-        return candidate.collect(context)
+        return collect_values(value.generator, value.env, context)
 
 
 class PrintBuiltin:
