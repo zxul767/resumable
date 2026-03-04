@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import json
 from typing import Any, Mapping, Protocol
 
 from ..writer import IndentingWriter
@@ -27,6 +28,38 @@ class RuntimeContext:
     writer: IndentingWriter = field(default_factory=IndentingWriter)
 
 
+def format_repl_value(value: Value) -> str:
+    if value is None:
+        return "nil"
+    if value is True:
+        return "true"
+    if value is False:
+        return "false"
+    if isinstance(value, str):
+        return json.dumps(value)
+    return str(value)
+
+
+def format_output_value(value: Value) -> str:
+    if isinstance(value, str):
+        return value
+    return format_repl_value(value)
+
+
+def value_type_name(value: Value) -> str:
+    if value is None:
+        return "nil"
+    if isinstance(value, bool):
+        return "bool"
+    if isinstance(value, int):
+        return "int"
+    if isinstance(value, float):
+        return "float"
+    if isinstance(value, str):
+        return "string"
+    return "value"
+
+
 class Env:
     def __init__(
         self,
@@ -49,7 +82,7 @@ class Env:
         if self.parent_env:
             return self.parent_env[key]
 
-        raise KeyError(key)
+        raise ValueError(f"undefined variable: {key}")
 
     def define(self, key: str, value: Value) -> None:
         self._key_values[key] = value
@@ -60,7 +93,7 @@ class Env:
         elif self.parent_env:
             self.parent_env[key] = value
         else:
-            raise KeyError(key)
+            raise ValueError(f"assignment to undefined variable: {key}")
 
     def all_vars(self) -> dict[str, Any]:
         result: dict[str, Any] = {

@@ -24,7 +24,7 @@ Function kinds:
 Semicolons are required for non-block statements.
 
 ## Expressions
-- literals: integers, strings, `true`, `false`, `nil`
+- literals: integers, floating-point numbers, strings, `true`, `false`, `nil`
 - variable: `name`
 - call: `name(arg1, arg2, ...)`
 - grouping: `(expr)`
@@ -64,6 +64,14 @@ Identifiers may end with one trailing `?` or `!`.
   - drains generator
   - returns yielded values
   - appends final generator return value when present
+- `print(value)`:
+  - accepts zero or one argument
+  - with no argument, writes an empty string
+  - writes user output to `stdout` without a trailing newline
+- `println(value)`:
+  - accepts zero or one argument
+  - with no argument, writes a newline
+  - writes user output to `stdout` with a trailing newline
 
 ## Semantic Rules
 - `yield` is valid only inside `gen`.

@@ -17,9 +17,10 @@ Dependency rule:
 - `runtime/expression_evaluator.py`: expression evaluation (`eval_expr`).
 - `runtime/statement_executor.py`: statement/declaration execution, `FunctionValue`, `ReturnSignal`.
 - `runtime/interpreter.py`: orchestration (`run`, `run_for_cli`).
-- `runtime/stdlib.py`: built-ins (`next`, `collect`).
+- `runtime/stdlib.py`: built-ins (`next`, `collect`, `print`, `println`).
 - `runtime/generator_compiler.py`: generator lowering bridge and `GeneratorValue`.
 - `runtime/generator.py`: resumable execution model.
+- `repl/`: REPL package (`app.py`, `highlighting.py`, package entry points).
 
 ## Frontend Modules
 - `frontend/grammar.lark`: grammar.

@@ -6,9 +6,34 @@ from lark.exceptions import LarkError
 from ..frontend.ast_statements import Program
 from ..frontend.parser import parse_and_validate
 from ..frontend.semantic import SemanticError
-from .core import Env, ProgramState, RuntimeContext
+from .core import Env, ProgramState, RuntimeContext, format_repl_value
 from .statement_executor import execute_declaration
 from .stdlib import install_stdlib
+
+
+def parse_for_cli(source: str, stderr: TextIO) -> Program | None:
+    try:
+        return parse_and_validate(source)
+    except (LarkError, SemanticError, ValueError) as error:
+        print(f"Syntax error: {error}", file=stderr)
+        return None
+    except Exception as error:
+        print(f"Syntax error (host): {error}", file=stderr)
+        return None
+
+
+def report_runtime_error(error: Exception, stderr: TextIO) -> None:
+    if isinstance(error, StopIteration):
+        if error.value is None:
+            print("Runtime error: generator is exhausted", file=stderr)
+            return
+        print(
+            "Runtime error: generator is exhausted "
+            f"(final value: {format_repl_value(error.value)})",
+            file=stderr,
+        )
+        return
+    print(f"Runtime error: {error}", file=stderr)
 
 
 def run_for_cli(
@@ -18,19 +43,14 @@ def run_for_cli(
 ) -> ProgramState | None:
     stream = stderr if stderr is not None else sys.stderr
 
-    try:
-        program = parse_and_validate(source)
-    except (LarkError, SemanticError, ValueError) as error:
-        print(f"Syntax error: {error}", file=stream)
-        return None
-    except Exception as error:
-        print(f"Syntax error (host): {error}", file=stream)
+    program = parse_for_cli(source, stream)
+    if program is None:
         return None
 
     try:
         return run(program, context)
     except Exception as error:
-        print(f"Runtime error: {error}", file=stream)
+        report_runtime_error(error, stream)
         return None
 
 

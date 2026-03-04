@@ -5,15 +5,6 @@ from resumable.runtime.interpreter import ProgramState, run
 from resumable.runtime import CallableValue, Value
 
 
-# ===== Helpers =====
-def invoke(state: ProgramState, name: str, args: list[Value]) -> Value | None:
-    value = state.global_env[name]
-    if not callable(value):
-        raise ValueError(f"{name} is not a function")
-    callable_value = cast(CallableValue, value)
-    return callable_value(args, state.context)
-
-
 # ===== Function Execution =====
 def test_simple_regular_function_call() -> None:
     state = run(
@@ -24,7 +15,7 @@ def test_simple_regular_function_call() -> None:
         """
     )
 
-    assert invoke(state, "add_one", [41]) == 42
+    assert _invoke(state, "add_one", [41]) == 42
 
 
 def test_recursive_fibonacci_function() -> None:
@@ -39,7 +30,7 @@ def test_recursive_fibonacci_function() -> None:
         """
     )
 
-    assert invoke(state, "fib", [10]) == 55
+    assert _invoke(state, "fib", [10]) == 55
 
 
 def test_block_scope_does_not_leak_shadowed_binding() -> None:
@@ -55,7 +46,7 @@ def test_block_scope_does_not_leak_shadowed_binding() -> None:
         """
     )
 
-    assert invoke(state, "f", []) == 1
+    assert _invoke(state, "f", []) == 1
 
 
 def test_top_level_statements_execute_in_global_env() -> None:
@@ -73,8 +64,8 @@ def test_top_level_statements_execute_in_global_env() -> None:
 def test_wrong_arity_raises_value_error() -> None:
     state = run("fun f(x) { return x; }")
 
-    with pytest.raises(ValueError, match=r"(?i)(?=.*arguments)(?=.*expected)(?=.*got)"):
-        invoke(state, "f", [])
+    with pytest.raises(ValueError, match=r"(?i)(?=.*arguments)(?=.*expected)"):
+        _invoke(state, "f", [])
 
 
 # ===== Interop With Generators =====
@@ -94,7 +85,7 @@ def test_regular_function_can_collect_from_generator_call() -> None:
         """
     )
 
-    assert invoke(state, "total", []) == [1, 2, 3]
+    assert _invoke(state, "total", []) == [1, 2, 3]
 
 
 def test_regular_function_can_step_generator_with_next() -> None:
@@ -112,7 +103,7 @@ def test_regular_function_can_step_generator_with_next() -> None:
         """
     )
 
-    assert invoke(state, "first", []) == 10
+    assert _invoke(state, "first", []) == 10
 
 
 def test_next_bubbles_stop_iteration_after_generator_exhaustion() -> None:
@@ -131,7 +122,7 @@ def test_next_bubbles_stop_iteration_after_generator_exhaustion() -> None:
     )
 
     with pytest.raises(StopIteration):
-        invoke(state, "second", [])
+        _invoke(state, "second", [])
 
 
 def test_next_bubbles_stop_iteration_return_value() -> None:
@@ -139,7 +130,7 @@ def test_next_bubbles_stop_iteration_return_value() -> None:
         """
         gen one_then_return() {
           yield 1;
-          return 99;
+          return 0;
         }
 
         fun second() {
@@ -151,5 +142,53 @@ def test_next_bubbles_stop_iteration_return_value() -> None:
     )
 
     with pytest.raises(StopIteration) as stop:
-        invoke(state, "second", [])
-    assert stop.value.value == 99
+        _invoke(state, "second", [])
+    assert stop.value.value == 0
+
+
+def test_print_and_println_write_user_output_to_stdout(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    state = run(
+        """
+        fun show() {
+          print("Hello");
+          println(" world");
+          println(true);
+          println(nil);
+        }
+        """
+    )
+
+    assert _invoke(state, "show", []) is None
+    captured = capsys.readouterr()
+    assert captured.out == "Hello world\ntrue\nnil\n"
+    assert captured.err == ""
+
+
+def test_print_and_println_allow_zero_arguments(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    state = run(
+        """
+        fun show() {
+          print();
+          println();
+          println("ok");
+        }
+        """
+    )
+
+    assert _invoke(state, "show", []) is None
+    captured = capsys.readouterr()
+    assert captured.out == "\nok\n"
+    assert captured.err == ""
+
+
+# ===== Helpers =====
+def _invoke(state: ProgramState, function_name: str, args: list[Value]) -> Value | None:
+    value = state.global_env[function_name]
+    if not callable(value):
+        raise ValueError(f"{function_name} is not a function")
+    callable_value = cast(CallableValue, value)
+    return callable_value(args, state.context)

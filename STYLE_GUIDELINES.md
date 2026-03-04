@@ -8,6 +8,7 @@
 - Never use `del` to silence unused parameters. Use a leading `_` if needed.
 - Do not apply speculative lint/style workarounds. Add them only when a configured tool reports a concrete issue.
 - Do not add `from __future__ import annotations` by default. Add it only when required.
+- Do not use `getattr` for attributes that are part of a known type contract. Prefer direct attribute access. Use `getattr` only for truly dynamic/optional third-party attributes, and document why.
 
 # NAMING
 - Use `snake_case` for functions.
