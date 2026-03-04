@@ -11,7 +11,7 @@ from .statement_executor import execute_declaration
 from .stdlib import install_stdlib
 
 
-def parse_source_for_cli(source: str, stderr: TextIO) -> Program | None:
+def parse_for_cli(source: str, stderr: TextIO) -> Program | None:
     try:
         return parse_and_validate(source)
     except (LarkError, SemanticError, ValueError) as error:
@@ -43,7 +43,7 @@ def run_for_cli(
 ) -> ProgramState | None:
     stream = stderr if stderr is not None else sys.stderr
 
-    program = parse_source_for_cli(source, stream)
+    program = parse_for_cli(source, stream)
     if program is None:
         return None
 

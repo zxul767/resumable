@@ -13,7 +13,7 @@ from ..frontend.ast_statements import ExpressionStatement, Declaration
 from ..frontend.parser import parse_tree
 from ..runtime.core import Env, RuntimeContext, format_repl_value
 from ..runtime.expression_evaluator import eval_expr
-from ..runtime.interpreter import parse_source_for_cli, report_runtime_error
+from ..runtime.interpreter import parse_for_cli, report_runtime_error
 from ..runtime.statement_executor import execute_declaration
 from ..runtime.stdlib import install_stdlib
 from .highlighting import LarkGrammarLexer, REPL_STYLE
@@ -29,7 +29,7 @@ def run_in_repl(
     stdout: TextIO,
     stderr: TextIO,
 ) -> bool:
-    program = parse_source_for_cli(source, stderr)
+    program = parse_for_cli(source, stderr)
     if program is None:
         return False
 
