@@ -5,6 +5,8 @@ from typing import Any, TextIO, cast
 from lark import Token
 from lark.exceptions import UnexpectedEOF, UnexpectedInput
 from prompt_toolkit import PromptSession
+from prompt_toolkit.enums import DEFAULT_BUFFER
+from prompt_toolkit.filters import has_focus
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.key_binding.key_processor import KeyPressEvent
@@ -119,9 +121,10 @@ def run_repl() -> None:
     def insert_newline(event: KeyPressEvent) -> None:
         event.current_buffer.insert_text("\n")
 
-    bindings.add("enter")(evaluate_if_complete)
-    bindings.add("tab")(indent)
-    bindings.add("c-j")(insert_newline)
+    default_input_focus = has_focus(DEFAULT_BUFFER)
+    bindings.add("enter", filter=default_input_focus)(evaluate_if_complete)
+    bindings.add("tab", filter=default_input_focus)(indent)
+    bindings.add("c-j", filter=default_input_focus)(insert_newline)
 
     history_path = Path.home() / ".resumable_repl_history"
     session = PromptSession[str](history=FileHistory(str(history_path)))
