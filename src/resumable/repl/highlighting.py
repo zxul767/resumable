@@ -89,6 +89,9 @@ class LarkGrammarLexer(Lexer):
         def append(style: str, text: str) -> None:
             if not text:
                 return
+            # prompt_toolkit expects already-split per-line fragments from lex_document.
+            # We split while preserving style boundaries and create new line buckets
+            # whenever a newline is encountered.
             parts = text.split("\n")
             for index, part in enumerate(parts):
                 if part:
@@ -102,11 +105,15 @@ class LarkGrammarLexer(Lexer):
             parser: Any = get_parser()
             tokens = list(parser.lex(source))
         except Exception:
+            # During live editing, partial/incomplete input can fail lexing.
+            # Fallback to plain text so editing remains responsive.
             append("", source)
             return lines
 
         cursor = 0
         for token in tokens:
+            # Lark may not always populate absolute positions in every mode.
+            # Normalize missing positions to a best-effort contiguous range.
             start_pos = token.start_pos if token.start_pos is not None else cursor
             end_pos = (
                 token.end_pos
@@ -115,11 +122,14 @@ class LarkGrammarLexer(Lexer):
             )
 
             if start_pos > cursor:
+                # Preserve un-tokenized gaps (typically whitespace/comments)
+                # so source text is reproduced exactly in the rendered buffer.
                 append("", source[cursor:start_pos])
             append(self._style_for_token(token), token.value)
             cursor = end_pos
 
         if cursor < len(source):
+            # Preserve any trailing text after the last token.
             append("", source[cursor:])
         return lines
 
