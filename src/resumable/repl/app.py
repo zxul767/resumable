@@ -1,7 +1,8 @@
 import sys
 from pathlib import Path
-from typing import TextIO
+from typing import Any, TextIO, cast
 
+from lark import Token
 from lark.exceptions import UnexpectedEOF, UnexpectedInput
 from prompt_toolkit import PromptSession
 from prompt_toolkit.history import FileHistory
@@ -78,10 +79,10 @@ def is_source_complete(source: str) -> bool:
         # (for example an open block or unfinished expression).
         return False
     except UnexpectedInput as error:
-        token = getattr(error, "token", None)
+        token = cast(Any, error).token
         # lark sometimes reports "unexpected end of input" as UnexpectedInput
         # with the synthetic $END token instead of raising UnexpectedEOF.
-        if token is not None and getattr(token, "type", None) == "$END":
+        if isinstance(token, Token) and token.type == "$END":
             return False
         # any other UnexpectedInput means input is complete but invalid.
         # we should submit so the user sees a syntax error message.

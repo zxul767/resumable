@@ -25,10 +25,7 @@ _DEFAULT_REPL_STYLE = Style.from_dict(
 def _resolve_pygments_style(style_name: str) -> Any | None:
     try:
         styles = import_module("pygments.styles")
-        get_style_by_name = getattr(styles, "get_style_by_name", None)
-        if not callable(get_style_by_name):
-            return None
-        return get_style_by_name(style_name)
+        return styles.get_style_by_name(style_name)
     except Exception:
         return None
 
