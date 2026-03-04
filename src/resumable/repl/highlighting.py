@@ -22,6 +22,7 @@ _DEFAULT_REPL_STYLE = Style.from_dict(
     }
 )
 
+
 def _resolve_pygments_style(style_name: str) -> Any | None:
     try:
         styles = import_module("pygments.styles")
@@ -31,12 +32,7 @@ def _resolve_pygments_style(style_name: str) -> Any | None:
 
 
 def get_repl_style() -> Style:
-    default_style_class = _resolve_pygments_style("friendly")
-    if default_style_class is not None:
-        default_style = style_from_pygments_cls(default_style_class)
-    else:
-        default_style = _DEFAULT_REPL_STYLE
-
+    default_style = _get_default_style()
     style_name = os.getenv("RESUMABLE_REPL_STYLE", "").strip().lower()
     if not style_name:
         return default_style
@@ -44,6 +40,13 @@ def get_repl_style() -> Style:
     if style_class is None:
         return default_style
     return style_from_pygments_cls(style_class)
+
+
+def _get_default_style() -> Style:
+    default_style_class = _resolve_pygments_style("friendly")
+    if default_style_class is not None:
+        return style_from_pygments_cls(default_style_class)
+    return _DEFAULT_REPL_STYLE
 
 
 class LarkGrammarLexer(Lexer):
@@ -83,7 +86,7 @@ class LarkGrammarLexer(Lexer):
     def _highlight(self, source: str) -> list[StyleAndTextTuples]:
         lines: list[StyleAndTextTuples] = [[]]
 
-        def append(style: str, text: str) -> None:
+        def append_to_lines(*, style: str, text: str) -> None:
             if not text:
                 return
             # prompt_toolkit expects already-split per-line fragments from lex_document.
@@ -93,7 +96,7 @@ class LarkGrammarLexer(Lexer):
             for index, part in enumerate(parts):
                 if part:
                     lines[-1].append((style, part))
-                if index < len(parts) - 1:
+                if index < len(parts) - 1:  # for every line except the last one
                     lines.append([])
 
         try:
@@ -104,7 +107,7 @@ class LarkGrammarLexer(Lexer):
         except Exception:
             # During live editing, partial/incomplete input can fail lexing.
             # Fallback to plain text so editing remains responsive.
-            append("", source)
+            append_to_lines(style="", text=source)
             return lines
 
         cursor = 0
@@ -117,17 +120,16 @@ class LarkGrammarLexer(Lexer):
                 if token.end_pos is not None
                 else start_pos + len(token.value)
             )
-
             if start_pos > cursor:
                 # Preserve un-tokenized gaps (typically whitespace/comments)
                 # so source text is reproduced exactly in the rendered buffer.
-                append("", source[cursor:start_pos])
-            append(self._style_for_token(token), token.value)
+                append_to_lines(style="", text=source[cursor:start_pos])
+            append_to_lines(style=self._style_for_token(token), text=token.value)
             cursor = end_pos
 
         if cursor < len(source):
             # Preserve any trailing text after the last token.
-            append("", source[cursor:])
+            append_to_lines(style="", text=source[cursor:])
         return lines
 
     def _style_for_token(self, token: Token) -> str:
