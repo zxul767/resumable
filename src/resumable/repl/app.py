@@ -74,27 +74,26 @@ def is_source_complete(source: str) -> bool:
         parse_tree(source)
         return True
     except UnexpectedEOF:
-        # Parser reached end-of-input while still expecting more tokens
+        # parser reached end-of-input while still expecting more tokens
         # (for example an open block or unfinished expression).
         return False
     except UnexpectedInput as error:
         token = getattr(error, "token", None)
-        # Lark sometimes reports "unexpected end of input" as UnexpectedInput
+        # lark sometimes reports "unexpected end of input" as UnexpectedInput
         # with the synthetic $END token instead of raising UnexpectedEOF.
         if token is not None and getattr(token, "type", None) == "$END":
             return False
-        # Any other UnexpectedInput means input is complete but invalid.
-        # Enter should submit so the user sees a syntax error message.
+        # any other UnexpectedInput means input is complete but invalid.
+        # we should submit so the user sees a syntax error message.
         return True
     except Exception:
-        # For non-parser failures, avoid trapping the user in multiline mode.
-        # Submit and let the normal error-reporting path handle it.
+        # for non-parser failures, avoid trapping the user in multiline mode.
+        # submit and let the normal error-reporting path handle it.
         return True
 
 
-def should_eval_source(source: str) -> bool:
-    stripped = source.strip()
-    if stripped in {"exit", "quit"}:
+def is_command_or_complete_source(source: str) -> bool:
+    if source.strip() in {"exit", "quit"}:
         return True
     return is_source_complete(source)
 
@@ -108,7 +107,7 @@ def run_repl() -> None:
 
     def evaluate_if_complete(event: KeyPressEvent) -> None:
         buffer = event.current_buffer
-        if should_eval_source(buffer.text):
+        if is_command_or_complete_source(buffer.text):
             buffer.validate_and_handle()
         else:
             buffer.insert_text("\n")
