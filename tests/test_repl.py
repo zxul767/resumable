@@ -1,6 +1,10 @@
 from io import StringIO
 
-from resumable.repl.app import run_in_repl, is_source_complete, should_eval_source
+from resumable.repl.app import (
+    is_command_or_complete_source,
+    is_source_complete,
+    run_in_repl,
+)
 from resumable.runtime.core import Env, RuntimeContext
 from resumable.runtime.stdlib import install_stdlib
 from .helpers import (
@@ -78,8 +82,8 @@ def test_is_complete_source_detects_incomplete_input() -> None:
 
 
 def test_should_submit_source_accepts_quit_commands_without_semicolon() -> None:
-    assert should_eval_source("quit") is True
-    assert should_eval_source("exit") is True
+    assert is_command_or_complete_source("quit") is True
+    assert is_command_or_complete_source("exit") is True
 
 
 def test_repl_prints_language_booleans_and_nil() -> None:

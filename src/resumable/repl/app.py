@@ -16,7 +16,7 @@ from ..runtime.expression_evaluator import eval_expr
 from ..runtime.interpreter import parse_for_cli, report_runtime_error
 from ..runtime.statement_executor import execute_declaration
 from ..runtime.stdlib import install_stdlib
-from .highlighting import LarkGrammarLexer, REPL_STYLE
+from .highlighting import LarkGrammarLexer, get_repl_style
 
 REPL_HELP = "Run/continue: Enter | New line: Ctrl-J | Quit: exit/quit/Ctrl-D"
 
@@ -124,6 +124,7 @@ def run_repl() -> None:
 
     history_path = Path.home() / ".resumable_repl_history"
     session = PromptSession[str](history=FileHistory(str(history_path)))
+    repl_style = get_repl_style()
     banner = r"""
 ███╗   ██╗ ██████╗ ██╗  ██╗    ██████╗ ███████╗██████╗ ██╗
 ████╗  ██║██╔═══██╗╚██╗██╔╝    ██╔══██╗██╔════╝██╔══██╗██║
@@ -144,7 +145,7 @@ def run_repl() -> None:
                 prompt_continuation=lambda _width, _line, _wrap: "... ",
                 key_bindings=bindings,
                 lexer=LarkGrammarLexer(),
-                style=REPL_STYLE,
+                style=repl_style,
             )
         except EOFError:
             print("bye")

@@ -1,3 +1,5 @@
+import os
+from importlib import import_module
 from typing import Any, Callable
 
 from lark import Token
@@ -5,19 +7,46 @@ from prompt_toolkit.document import Document
 from prompt_toolkit.formatted_text import StyleAndTextTuples
 from prompt_toolkit.lexers import Lexer
 from prompt_toolkit.styles import Style
+from prompt_toolkit.styles.pygments import style_from_pygments_cls
 
 from ..frontend.parser import get_parser
 
 
-REPL_STYLE = Style.from_dict(
+_DEFAULT_REPL_STYLE = Style.from_dict(
     {
-        "keyword": "ansimagenta bold",
-        "number": "ansicyan",
-        "string": "ansigreen",
-        "operator": "ansiyellow",
-        "punctuation": "ansibrightblack",
+        "pygments.keyword": "ansimagenta bold",
+        "pygments.number": "ansicyan",
+        "pygments.string": "ansigreen",
+        "pygments.operator": "ansiyellow",
+        "pygments.punctuation": "ansibrightblack",
     }
 )
+
+def _resolve_pygments_style(style_name: str) -> Any | None:
+    try:
+        styles = import_module("pygments.styles")
+        get_style_by_name = getattr(styles, "get_style_by_name", None)
+        if not callable(get_style_by_name):
+            return None
+        return get_style_by_name(style_name)
+    except Exception:
+        return None
+
+
+def get_repl_style() -> Style:
+    default_style_class = _resolve_pygments_style("friendly")
+    if default_style_class is not None:
+        default_style = style_from_pygments_cls(default_style_class)
+    else:
+        default_style = _DEFAULT_REPL_STYLE
+
+    style_name = os.getenv("RESUMABLE_REPL_STYLE", "").strip().lower()
+    if not style_name:
+        return default_style
+    style_class = _resolve_pygments_style(style_name)
+    if style_class is None:
+        return default_style
+    return style_from_pygments_cls(style_class)
 
 
 class LarkGrammarLexer(Lexer):
@@ -96,13 +125,13 @@ class LarkGrammarLexer(Lexer):
 
     def _style_for_token(self, token: Token) -> str:
         if token.type in self.keyword_types:
-            return "class:keyword"
+            return "class:pygments.keyword"
         if token.type in self.number_types:
-            return "class:number"
+            return "class:pygments.number"
         if token.type in self.string_types:
-            return "class:string"
+            return "class:pygments.string"
         if token.type in self.operator_types:
-            return "class:operator"
+            return "class:pygments.operator"
         if token.type in self.punctuation_types:
-            return "class:punctuation"
+            return "class:pygments.punctuation"
         return ""
